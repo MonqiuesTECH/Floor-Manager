@@ -118,11 +118,11 @@ if audio_value:
                 with st.chat_message("user"):
                     st.markdown(user_text)
 
-                # Generate AI Response using Groq's Llama 3.1 model via OpenAI client
+                # Generate AI Response using Groq's highly stable Llama 3 model via OpenAI client
                 with st.chat_message("assistant"):
                     with st.spinner("Translating..."):
                         completion = client.chat.completions.create(
-                            model="llama-3.1-70b-versatile",
+                            model="llama3-8b-8192",
                             messages=st.session_state.messages,
                             temperature=0.3,
                             max_tokens=120
