@@ -8,14 +8,12 @@ from openai import OpenAI
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. API Key Setup - UI Override
+# 2. API Key Setup - UI Override & Secrets Fallback
 st.sidebar.markdown("### Debug Menu")
 ui_key = st.sidebar.text_input("Paste Groq API Key here to force connection:", type="password")
 
-# Use the UI key first, fallback to secrets if empty
 GROQ_API_KEY = ui_key or st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 
-# Graceful fallback if the key is missing entirely
 if not GROQ_API_KEY:
     st.error("🚨 API Key missing! Please open the sidebar (top left > icon) and paste your key.")
     st.stop()
@@ -72,15 +70,15 @@ def speak_text(text):
     """
     components.html(js_code, height=0, width=0)
 
-# 5. System Prompt & Guardrails
-SYSTEM_PROMPT = """You are the Floor Manager for a community food pantry. 
-Your job is to welcome visitors, answer quick questions, confirm if they want a food ration today, and guide them.
+# 5. Non-Profit Logic & System Guardrails
+SYSTEM_PROMPT = """You are the empathetic, efficient Floor Manager for a community food pantry.
 
-CRITICAL RULES:
-1. NEVER ask for a name, ID, phone number, address, or reason for needing aid.
-2. Automatically detect the user's language and reply in the EXACT SAME language (even if they switch languages mid-sentence).
-3. Keep responses strictly to 1-2 short, warm sentences.
-4. If they confirm they want food, politely instruct them to tap the green "Claim Ration" button on the screen."""
+NON-PROFIT OPERATIONAL RULES:
+1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. If someone asks to buy an item or ask about cost, warmly clarify that all food is completely free of charge.
+2. PRE-PACKED RATION KITS: We distribute standard, pre-assembled food ration kits (containing fresh produce, canned goods, and staples). We do not fulfill custom grocery orders or individual item sales.
+3. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.
+4. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.
+5. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Always direct visitors to tap the green 'Claim Ration' button on the screen to receive their package today."""
 
 # 6. User Interface
 st.title("Community Pantry Kiosk")
@@ -104,7 +102,7 @@ audio_value = st.audio_input("Tap the microphone to speak to the Floor Manager")
 if audio_value:
     with st.spinner("Listening..."):
         try:
-            # Transcribe voice input using Groq's Whisper model via OpenAI client
+            # Transcribe voice input
             transcription = client.audio.transcriptions.create(
                 file=("audio.wav", audio_value.read()),
                 model="whisper-large-v3-turbo",
@@ -118,24 +116,24 @@ if audio_value:
                 with st.chat_message("user"):
                     st.markdown(user_text)
 
-                # Generate AI Response using Groq's active OpenAI GPT-OSS model
+                # Generate AI Response using active Groq OpenAI model
                 with st.chat_message("assistant"):
-                    with st.spinner("Translating..."):
+                    with st.spinner("Processing..."):
                         completion = client.chat.completions.create(
                             model="openai/gpt-oss-120b",
                             messages=st.session_state.messages,
-                            temperature=0.3,
+                            temperature=0.2,
                             max_tokens=120
                         )
                         response_text = completion.choices[0].message.content
                         st.markdown(response_text)
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
                         
-                        # Speak response using browser speech engine
+                        # Trigger Speech Synthesis
                         speak_text(response_text)
 
         except Exception as e:
-            st.error(f"Connection issue: {e}. Please check your API limits or network connection.")
+            st.error(f"Connection issue: {e}. Please verify your network connection or API key.")
 
 st.divider()
 
