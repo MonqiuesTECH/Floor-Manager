@@ -11,9 +11,9 @@ st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="
 # 2. Initialize Client using OpenAI SDK pointed at Groq's Endpoint
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 
-# Graceful fallback if the key is missing
+# Graceful fallback if the key is missing from Streamlit Cloud Secrets
 if not GROQ_API_KEY:
-    st.error("🚨 API Key missing! Please add GROQ_API_KEY to your Streamlit Cloud Secrets.")
+    st.error("🚨 API Key missing! Please add GROQ_API_KEY to your Streamlit Cloud Secrets dashboard.")
     st.stop()
 
 client = OpenAI(
@@ -54,18 +54,4 @@ def claim_ration():
 
 init_db()
 
-# 4. Zero-Cost Browser Text-to-Speech JS Injection
-def speak_text(text):
-    clean_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    js_code = f"""
-    <script>
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance("{clean_text}");
-            window.speechSynthesis.speak(utterance);
-        }}
-    </script>
-    """
-    components.html(js_code, height=0, width=0)
-
-# 5. System Prompt
+# 4. Zero-Cost Browser Text-to-
