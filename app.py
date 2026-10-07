@@ -11,6 +11,11 @@ st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="
 # 2. Initialize Client using OpenAI SDK pointed at Groq's Endpoint
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 
+# Graceful fallback if the key is missing
+if not GROQ_API_KEY:
+    st.error("🚨 API Key missing! Please add GROQ_API_KEY to your Streamlit Cloud Secrets.")
+    st.stop()
+
 client = OpenAI(
     api_key=GROQ_API_KEY,
     base_url="https://api.groq.com/openai/v1"
@@ -63,5 +68,4 @@ def speak_text(text):
     """
     components.html(js_code, height=0, width=0)
 
-# 5. System Prompt & Guardrails
-SYSTEM_PROMPT
+# 5. System Prompt
