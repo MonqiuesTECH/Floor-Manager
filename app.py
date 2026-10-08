@@ -33,7 +33,7 @@ def init_db():
     today = date.today().isoformat()
     c.execute("SELECT * FROM inventory WHERE date=?", (today,))
     if not c.fetchone():
-        c.execute("INSERT INTO inventory VALUES (?, ?, ?)", (today, 150, 0)) # Default 150 daily kits
+        c.execute("INSERT INTO inventory VALUES (?, ?, ?)", (today, 150, 0))
     conn.commit()
     conn.close()
 
@@ -71,7 +71,7 @@ def speak_text(text):
     components.html(js_code, height=0, width=0)
 
 # 5. Non-Profit Logic & System Guardrails
-SYSTEM_PROMPT = """You are the empathetic, efficient Floor Manager for a community food pantry.
+SYSTEM_PROMPT = """You are Monique, the empathetic, efficient Floor Manager for a community food pantry.
 
 NON-PROFIT OPERATIONAL RULES:
 1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. If someone asks to buy an item or ask about cost, warmly clarify that all food is completely free of charge.
@@ -87,80 +87,97 @@ if "audio_key" not in st.session_state:
     st.session_state.audio_key = 0
 if "claim_success" not in st.session_state:
     st.session_state.claim_success = False
+if "session_active" not in st.session_state:
+    st.session_state.session_active = False
+if "speak_greeting" not in st.session_state:
+    st.session_state.speak_greeting = False
 
 # 7. Button Callback Logic
+def start_session():
+    st.session_state.session_active = True
+    greeting = "Hi, I'm Monique. How can I help you today?"
+    st.session_state.messages.append({"role": "assistant", "content": greeting})
+    st.session_state.speak_greeting = greeting  # Flag to trigger audio on next render
+
 def process_claim():
     t, d = get_inventory()
     if t - d > 0:
         claim_ration()
-        # Wipe the chat history clean
+        # Reset everything for the next person
         st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        # Increment the audio key to force the microphone widget to reset
         st.session_state.audio_key += 1
-        # Set a flag to show a success banner on the next render
         st.session_state.claim_success = True
+        st.session_state.session_active = False 
 
-# 8. User Interface Rendering
+# 8. Main UI 
 st.title("Community Pantry Kiosk")
 
 total, distributed = get_inventory()
 remaining = total - distributed
 st.metric(label="Rations Remaining Today", value=remaining)
 
-# Display the success banner if the button was just clicked
 if st.session_state.claim_success:
     st.success("✅ Ration claimed! Ready for the next person.")
     st.session_state.claim_success = False
 
-# Display chat history
-for msg in st.session_state.messages:
-    if msg["role"] != "system":
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+# 9. Session Routing: Start Screen vs Active Chat
+if not st.session_state.session_active:
+    st.write("---")
+    st.button("👋 Press to Begin", on_click=start_session, use_container_width=True, type="primary")
 
-# 9. Voice Input & Processing (Using dynamic key)
-audio_value = st.audio_input("Tap the microphone to speak to the Floor Manager", key=f"mic_{st.session_state.audio_key}")
+else:
+    # Play the greeting audio if the session just started
+    if st.session_state.speak_greeting:
+        speak_text(st.session_state.speak_greeting)
+        st.session_state.speak_greeting = False
 
-if audio_value:
-    with st.spinner("Listening..."):
-        try:
-            # Transcribe voice input
-            transcription = client.audio.transcriptions.create(
-                file=("audio.wav", audio_value.read()),
-                model="whisper-large-v3-turbo",
-                response_format="text"
-            )
-            
-            user_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
+    # Display chat history
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-            if user_text:
-                st.session_state.messages.append({"role": "user", "content": user_text})
-                with st.chat_message("user"):
-                    st.markdown(user_text)
+    # Voice Input
+    audio_value = st.audio_input("Tap the microphone to reply", key=f"mic_{st.session_state.audio_key}")
 
-                # Generate AI Response
-                with st.chat_message("assistant"):
-                    with st.spinner("Processing..."):
-                        completion = client.chat.completions.create(
-                            model="openai/gpt-oss-120b",
-                            messages=st.session_state.messages,
-                            temperature=0.2,
-                            max_tokens=120
-                        )
-                        response_text = completion.choices[0].message.content
-                        st.markdown(response_text)
-                        st.session_state.messages.append({"role": "assistant", "content": response_text})
-                        
-                        # Trigger Speech Synthesis
-                        speak_text(response_text)
+    if audio_value:
+        with st.spinner("Listening..."):
+            try:
+                transcription = client.audio.transcriptions.create(
+                    file=("audio.wav", audio_value.read()),
+                    model="whisper-large-v3-turbo",
+                    response_format="text"
+                )
+                
+                user_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
 
-        except Exception as e:
-            st.error(f"Connection issue: {e}. Please verify your network connection or API key.")
+                if user_text:
+                    st.session_state.messages.append({"role": "user", "content": user_text})
+                    with st.chat_message("user"):
+                        st.markdown(user_text)
 
-st.divider()
+                    # Generate AI Response
+                    with st.chat_message("assistant"):
+                        with st.spinner("Processing..."):
+                            completion = client.chat.completions.create(
+                                model="openai/gpt-oss-120b",
+                                messages=st.session_state.messages,
+                                temperature=0.2,
+                                max_tokens=120
+                            )
+                            response_text = completion.choices[0].message.content
+                            st.markdown(response_text)
+                            st.session_state.messages.append({"role": "assistant", "content": response_text})
+                            
+                            speak_text(response_text)
 
-# 10. Single-Click Claim Button
-st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(remaining <= 0))
+            except Exception as e:
+                st.error(f"Connection issue: {e}. Please verify your network connection or API key.")
 
-if remaining <= 0:
-    st.error("Daily rations are currently empty for today.")
+    st.divider()
+
+    # Single-Click Claim Button (Only visible during an active session)
+    st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(remaining <= 0))
+
+    if remaining <= 0:
+        st.error("Daily rations are currently empty for today.")
