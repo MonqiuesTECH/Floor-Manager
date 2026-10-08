@@ -8,7 +8,7 @@ from openai import OpenAI
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. API Key Setup - UI Override & Secrets Fallback
+# 2. API Key Setup
 st.sidebar.markdown("### Debug Menu")
 ui_key = st.sidebar.text_input("Paste Groq API Key here to force connection:", type="password")
 
@@ -80,15 +80,37 @@ NON-PROFIT OPERATIONAL RULES:
 4. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.
 5. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Always direct visitors to tap the green 'Claim Ration' button on the screen to receive their package today."""
 
-# 6. User Interface
+# 6. Smooth State Management Initialization
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+if "audio_key" not in st.session_state:
+    st.session_state.audio_key = 0
+if "claim_success" not in st.session_state:
+    st.session_state.claim_success = False
+
+# 7. Button Callback Logic
+def process_claim():
+    t, d = get_inventory()
+    if t - d > 0:
+        claim_ration()
+        # Wipe the chat history clean
+        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # Increment the audio key to force the microphone widget to reset
+        st.session_state.audio_key += 1
+        # Set a flag to show a success banner on the next render
+        st.session_state.claim_success = True
+
+# 8. User Interface Rendering
 st.title("Community Pantry Kiosk")
 
 total, distributed = get_inventory()
 remaining = total - distributed
 st.metric(label="Rations Remaining Today", value=remaining)
 
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+# Display the success banner if the button was just clicked
+if st.session_state.claim_success:
+    st.success("✅ Ration claimed! Ready for the next person.")
+    st.session_state.claim_success = False
 
 # Display chat history
 for msg in st.session_state.messages:
@@ -96,8 +118,8 @@ for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-# 7. Voice Input & Processing
-audio_value = st.audio_input("Tap the microphone to speak to the Floor Manager")
+# 9. Voice Input & Processing (Using dynamic key)
+audio_value = st.audio_input("Tap the microphone to speak to the Floor Manager", key=f"mic_{st.session_state.audio_key}")
 
 if audio_value:
     with st.spinner("Listening..."):
@@ -116,7 +138,7 @@ if audio_value:
                 with st.chat_message("user"):
                     st.markdown(user_text)
 
-                # Generate AI Response using active Groq OpenAI model
+                # Generate AI Response
                 with st.chat_message("assistant"):
                     with st.spinner("Processing..."):
                         completion = client.chat.completions.create(
@@ -137,13 +159,8 @@ if audio_value:
 
 st.divider()
 
-# 8. Anonymous Claim Button
-if st.button("✅ Claim Ration", use_container_width=True, type="primary"):
-    if remaining > 0:
-        claim_ration()
-        st.success("Ration claimed! The counter has been updated anonymously.")
-        # Reset conversation for next person in line
-        st.session_state.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        st.rerun()
-    else:
-        st.error("Daily rations are currently empty for today.")
+# 10. Single-Click Claim Button
+st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(remaining <= 0))
+
+if remaining <= 0:
+    st.error("Daily rations are currently empty for today.")
