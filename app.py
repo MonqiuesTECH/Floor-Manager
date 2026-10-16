@@ -60,7 +60,7 @@ def build_system_prompt():
         f"{basket_data}\n\n"
         "NON-PROFIT OPERATIONAL RULES:\n"
         "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. All food is completely free of charge.\n"
-        "2. BASKET & LIMITS: Visitors can choose up to 3 items from each food department. When they ask for an item, confirm that it has been added to their basket and let them know what else they can pick.\n"
+        "2. BASKET & LIMITS: Visitors can choose up to 3 items from each food department. Acknowledge what they have added to their basket warmly and let them know what else they can pick.\n"
         "3. ACCURATE STOCK & DIALECT FLEXIBILITY: Accurately answer what items we have in stock using ONLY the live inventory database. Understand slang, Ebonics, different dialects, or other languages semantically.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.\n"
         "5. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.\n"
@@ -70,7 +70,7 @@ def build_system_prompt():
 
 # 6. Smooth State Management Initialization
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": build_system_prompt()}]
+    st.session_state.messages = []
 if "audio_key" not in st.session_state:
     st.session_state.audio_key = 0
 if "claim_success" not in st.session_state:
@@ -88,8 +88,10 @@ if "pickup_ticket" not in st.session_state:
 def start_session():
     st.session_state.session_active = True
     greeting = "Hey honey! Welcome to Cultivating Community. You can pick up to 3 items from each food department today—what can I add to your basket?"
-    st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
-    st.session_state.messages.append({"role": "assistant", "content": greeting})
+    st.session_state.messages = [
+        {"role": "system", "content": build_system_prompt()},
+        {"role": "assistant", "content": greeting}
+    ]
     st.session_state.speak_greeting = greeting  
 
 def process_claim():
@@ -104,33 +106,40 @@ def process_claim():
 # Helper function to auto-add items based on user utterance
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
-    added_items = []
     for item in inventory_items:
         iname = item['item_name']
-        if iname.lower() in text_lower or any(word in text_lower for word in iname.lower().split() if len(word) > 3):
+        # Check if the item name or significant keywords match the user text
+        keywords = [w.lower() for w in iname.split() if len(w) > 2]
+        if iname.lower() in text_lower or any(kw in text_lower for kw in keywords):
             cat = item['category']
             current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
             cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
-            if cat_count + 1 <= 3 and current_qty < 5:
-                st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
-                added_items.append(iname)
-    return added_items
+            # Add up to 3 items if under category limit
+            if cat_count < 3 and current_qty < 3:
+                add_amount = min(3 - current_qty, 3 - cat_count)
+                if add_amount > 0:
+                    st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + add_amount}
 
 # Function to handle AI response generation smoothly
-def handle_ai_response():
-    st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
-    with st.chat_message("assistant"):
-        with st.spinner("Monique is thinking..."):
-            completion = client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=st.session_state.messages,
-                temperature=0.2,
-                max_tokens=120
-            )
-            response_text = completion.choices[0].message.content
-            st.markdown(response_text)
-            st.session_state.messages.append({"role": "assistant", "content": response_text})
-            speak_text(response_text)
+def generate_monique_response():
+    # Always update system prompt with latest basket & inventory state
+    if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
+        st.session_state.messages[0]["content"] = build_system_prompt()
+    else:
+        st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt()})
+
+    try:
+        completion = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=st.session_state.messages,
+            temperature=0.3,
+            max_tokens=150
+        )
+        response_text = completion.choices[0].message.content
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
+        st.session_state.speak_greeting = response_text
+    except Exception as e:
+        st.error(f"Connection issue: {e}")
 
 # 8. Main UI  
 st.title("Community Pantry Kiosk")
@@ -153,14 +162,15 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Quick Add to Basket")
 selected_item = st.sidebar.selectbox("Select pantry item:", [i['item_name'] for i in inventory_items] if inventory_items else [])
-add_qty = st.sidebar.number_input("Quantity", min_value=1, max_value=5, value=1)
+add_qty = st.sidebar.number_input("Quantity", min_value=1, max_value=3, value=1)
 if st.sidebar.button("Add Item"):
     matched = next((i for i in inventory_items if i['item_name'] == selected_item), None)
     if matched:
         cat = matched['category']
         cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
         if cat_count + add_qty <= 3:
-            st.session_state.basket[selected_item] = {"category": cat, "quantity": add_qty}
+            current_q = st.session_state.basket.get(selected_item, {}).get("quantity", 0)
+            st.session_state.basket[selected_item] = {"category": cat, "quantity": current_q + add_qty}
             st.success(f"Added {add_qty}x {selected_item} to basket!")
             st.rerun()
         else:
@@ -186,13 +196,12 @@ else:
         speak_text(st.session_state.speak_greeting)
         st.session_state.speak_greeting = False
 
-    # Display chat history
+    # Display chat history cleanly
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    # Input Section: Audio + Text Option with Unique Icon Button
     st.markdown("### 💬 Talk or Type to Monique")
     
     col1, col2 = st.columns([3, 1])
@@ -204,9 +213,7 @@ else:
         st.markdown("<br>", unsafe_allow_html=True)
         text_submit_btn = st.button("✨ Ask Monique", type="secondary", use_container_width=True)
 
-    text_input_val = st.text_input("Or type what you need here:", key=f"text_input_{st.session_state.audio_key}")
-
-    user_text = ""
+    user_text = st.chat_input("Type what you need here...")
 
     # Process Audio Input
     if audio_value:
@@ -221,23 +228,17 @@ else:
             except Exception as e:
                 st.error(f"Transcription error: {e}")
 
-    # Process Text Input or Button Trigger
-    elif text_submit_btn and text_input_val.strip():
-        user_text = text_input_val.strip()
-
+    # Handle incoming user message
     if user_text:
         st.session_state.messages.append({"role": "user", "content": user_text})
-        with st.chat_message("user"):
-            st.markdown(user_text)
-
-        # Auto-add items requested by user to basket
+        
+        # Auto-add requested items to basket
         check_and_auto_add_cart(user_text, inventory_items)
         
-        # Increment audio key to reset the input widget cleanly
+        # Generate Monique's response
+        generate_monique_response()
+        
         st.session_state.audio_key += 1
-
-        # Generate AI Response
-        handle_ai_response()
         st.rerun()
 
     st.divider()
