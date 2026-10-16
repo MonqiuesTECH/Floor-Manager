@@ -24,7 +24,7 @@ client = OpenAI(
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory & Daily Tracking Engine
+# 3. Supabase Inventory Engine
 def get_pantry_inventory():
     """Fetches the live inventory items from Supabase."""
     try:
@@ -47,7 +47,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic Non-Profit System Prompt with Persona and Basket Parsing Rules
+# 5. Dynamic Non-Profit System Prompt with Persona & Live Basket
 def build_system_prompt():
     inventory_data = get_pantry_inventory()
     basket_data = st.session_state.get("basket", {})
@@ -56,15 +56,15 @@ def build_system_prompt():
         "Your voice and tone are that of a grounded, caring Black woman—welcoming, respectful, community-oriented, and real (using warm expressions like 'Hey honey', 'Got you covered', or 'Fam' naturally when appropriate).\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
         f"{inventory_data}\n\n"
-        "CURRENT VISITOR BASKET:\n"
+        "CURRENT VISITOR BASKET (What they have selected so far):\n"
         f"{basket_data}\n\n"
         "NON-PROFIT OPERATIONAL RULES:\n"
         "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. All food is completely free of charge.\n"
-        "2. AUTO-ADD & BASKET LIMITS: Visitors can choose up to 3 items from each food department. If they request an item (like fresh apples, bread, or hot meals), acknowledge it warmly and let them know it's being added or has been added to their cart/basket.\n"
+        "2. BASKET & LIMITS: Visitors can choose up to 3 items from each food department. When they ask for an item, confirm that it has been added to their basket and let them know what else they can pick.\n"
         "3. ACCURATE STOCK & DIALECT FLEXIBILITY: Accurately answer what items we have in stock using ONLY the live inventory database. Understand slang, Ebonics, different dialects, or other languages semantically.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.\n"
         "5. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.\n"
-        "6. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Direct visitors to check their basket on the sidebar and tap the green 'Claim Ration' button to lock in their pickup time."
+        "6. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Direct visitors to check their basket on the sidebar and tap the green 'Claim Ration' button when they're finished."
     )
     return prompt
 
@@ -98,24 +98,39 @@ def process_claim():
         "time": pickup_time,
         "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
-    st.session_state.messages = [{"role": "system", "content": build_system_prompt()}]
-    st.session_state.audio_key += 1
     st.session_state.claim_success = True
-    st.session_state.session_active = False
     st.session_state.basket = {}
 
 # Helper function to auto-add items based on user utterance
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
+    added_items = []
     for item in inventory_items:
         iname = item['item_name']
-        if iname.lower() in text_lower or any(word in text_lower for word in iname.lower().split()):
+        if iname.lower() in text_lower or any(word in text_lower for word in iname.lower().split() if len(word) > 3):
             cat = item['category']
             current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
             cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
             if cat_count + 1 <= 3 and current_qty < 5:
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
-                break
+                added_items.append(iname)
+    return added_items
+
+# Function to handle AI response generation smoothly
+def handle_ai_response():
+    st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
+    with st.chat_message("assistant"):
+        with st.spinner("Monique is thinking..."):
+            completion = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=st.session_state.messages,
+                temperature=0.2,
+                max_tokens=120
+            )
+            response_text = completion.choices[0].message.content
+            st.markdown(response_text)
+            st.session_state.messages.append({"role": "assistant", "content": response_text})
+            speak_text(response_text)
 
 # 8. Main UI  
 st.title("Community Pantry Kiosk")
@@ -128,12 +143,12 @@ st.metric(label="Total Items Available Today", value=total_quantity)
 st.sidebar.markdown("### 🛒 Your Custom Basket")
 if st.session_state.basket:
     for item_name, details in st.session_state.basket.items():
-        st.sidebar.text(f"• {item_name} ({details['quantity']})")
+        st.sidebar.text(f"• {item_name} (Qty: {details['quantity']})")
     if st.sidebar.button("Clear Basket"):
         st.session_state.basket = {}
         st.rerun()
 else:
-    st.sidebar.info("Your basket is empty. Tell Monique what you need or select below!")
+    st.sidebar.info("Your basket is empty. Tell Monique what you need!")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Quick Add to Basket")
@@ -154,7 +169,12 @@ if st.sidebar.button("Add Item"):
 if st.session_state.claim_success and st.session_state.pickup_ticket:
     ticket = st.session_state.pickup_ticket
     st.success(f"✅ Ration successfully claimed! Please pick up your basket at **{ticket['time']}** today at **{ticket['location']}**.")
-    st.session_state.pickup_ticket = None
+    if st.button("Start New Visit"):
+        st.session_state.claim_success = False
+        st.session_state.pickup_ticket = None
+        st.session_state.session_active = False
+        st.session_state.messages = []
+        st.rerun()
 
 # 9. Session Routing: Start Screen vs Active Chat
 if not st.session_state.session_active:
@@ -172,9 +192,23 @@ else:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    # Voice Input
-    audio_value = st.audio_input("Tap the microphone to reply", key=f"mic_{st.session_state.audio_key}")
+    # Input Section: Audio + Text Option with Unique Icon Button
+    st.markdown("### 💬 Talk or Type to Monique")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        audio_value = st.audio_input("Tap microphone to talk", key=f"mic_{st.session_state.audio_key}")
+    
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        text_submit_btn = st.button("✨ Ask Monique", type="secondary", use_container_width=True)
 
+    text_input_val = st.text_input("Or type what you need here:", key=f"text_input_{st.session_state.audio_key}")
+
+    user_text = ""
+
+    # Process Audio Input
     if audio_value:
         with st.spinner("Listening..."):
             try:
@@ -183,34 +217,28 @@ else:
                     model="whisper-large-v3-turbo",
                     response_format="text"
                 )
-                
                 user_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
-
-                if user_text:
-                    st.session_state.messages.append({"role": "user", "content": user_text})
-                    with st.chat_message("user"):
-                        st.markdown(user_text)
-
-                    # Auto-add items requested by user to basket
-                    check_and_auto_add_cart(user_text, inventory_items)
-
-                    # Generate AI Response with live Supabase inventory and updated basket context
-                    with st.chat_message("assistant"):
-                        with st.spinner("Processing..."):
-                            completion = client.chat.completions.create(
-                                model="openai/gpt-oss-120b",
-                                messages=st.session_state.messages,
-                                temperature=0.2,
-                                max_tokens=120
-                            )
-                            response_text = completion.choices[0].message.content
-                            st.markdown(response_text)
-                            st.session_state.messages.append({"role": "assistant", "content": response_text})
-                            
-                            speak_text(response_text)
-
             except Exception as e:
-                st.error(f"Connection issue: {e}. Please verify your network connection or secrets configuration.")
+                st.error(f"Transcription error: {e}")
+
+    # Process Text Input or Button Trigger
+    elif text_submit_btn and text_input_val.strip():
+        user_text = text_input_val.strip()
+
+    if user_text:
+        st.session_state.messages.append({"role": "user", "content": user_text})
+        with st.chat_message("user"):
+            st.markdown(user_text)
+
+        # Auto-add items requested by user to basket
+        check_and_auto_add_cart(user_text, inventory_items)
+        
+        # Increment audio key to reset the input widget cleanly
+        st.session_state.audio_key += 1
+
+        # Generate AI Response
+        handle_ai_response()
+        st.rerun()
 
     st.divider()
 
