@@ -51,21 +51,3 @@ def speak_text(text):
     js_code = f"""
     <script>
         if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance("{clean_text}");
-            window.speechSynthesis.speak(utterance);
-        }}
-    </script>
-    """
-    components.html(js_code, height=0, width=0)
-
-# 5. Dynamic Non-Profit System Prompt with Supabase Inventory Context
-def build_system_prompt():
-    inventory_data = get_pantry_inventory()
-    return f"""You are Monique, the empathetic, efficient Floor Manager for Cultivating Community, a community food pantry in Washington, D.C.
-
-LIVE PANTRY INVENTORY DATABASE:
-{inventory_data}
-
-NON-PROFIT OPERATIONAL RULES:
-1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. If someone asks to buy an item or
