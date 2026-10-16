@@ -8,20 +8,13 @@ from datetime import datetime, timedelta
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. API Key & Supabase Setup
-st.sidebar.markdown("### Debug Menu")
-ui_key = st.sidebar.text_input("Paste Groq API Key here to force connection:", type="password")
-
-GROQ_API_KEY = ui_key or st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
+# 2. Secure Secret Configuration (No UI Inputs)
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL"))
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY"))
 
-if not GROQ_API_KEY:
-    st.error("🚨 API Key missing! Please open the sidebar (top left > icon) and paste your key.")
-    st.stop()
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("🚨 Supabase credentials missing! Please configure SUPABASE_URL and SUPABASE_KEY in your secrets.")
+if not GROQ_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("🚨 Required API keys or Supabase credentials are missing from your Streamlit secrets configuration.")
     st.stop()
 
 client = OpenAI(
@@ -217,7 +210,7 @@ else:
                             speak_text(response_text)
 
             except Exception as e:
-                st.error(f"Connection issue: {e}. Please verify your network connection or API key.")
+                st.error(f"Connection issue: {e}. Please verify your network connection or secrets configuration.")
 
     st.divider()
 
