@@ -48,7 +48,6 @@ def get_total_distributed():
 # 4. Zero-Cost Browser Text-to-Speech JS Injection
 def speak_text(text):
     clean_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
-    # Using standard concatenation to prevent copy-paste truncation errors
     js_code = (
         "<script>\n"
         "if ('speechSynthesis' in window) {\n"
@@ -63,7 +62,6 @@ def speak_text(text):
 # 5. Dynamic Non-Profit System Prompt with Supabase Inventory Context
 def build_system_prompt():
     inventory_data = get_pantry_inventory()
-    # Using standard concatenation here too to prevent triple-quote errors
     prompt = (
         "You are Monique, the empathetic, efficient Floor Manager for Cultivating Community, a community food pantry in Washington, D.C.\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
@@ -93,13 +91,11 @@ if "speak_greeting" not in st.session_state:
 def start_session():
     st.session_state.session_active = True
     greeting = "Hi, I'm Monique. How can I help you today?"
-    # Update system prompt with fresh inventory on session start
     st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
     st.session_state.messages.append({"role": "assistant", "content": greeting})
     st.session_state.speak_greeting = greeting  
 
 def process_claim():
-    # Reset conversation and trigger success state for the next visitor
     st.session_state.messages = [{"role": "system", "content": build_system_prompt()}]
     st.session_state.audio_key += 1
     st.session_state.claim_success = True
