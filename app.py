@@ -86,7 +86,7 @@ if "session_active" not in st.session_state:
 if "speak_greeting" not in st.session_state:
     st.session_state.speak_greeting = False
 if "basket" not in st.session_state:
-    st.session_state.basket = {}  # Format: {item_name: {"category": cat, "quantity": qty}}
+    st.session_state.basket = {}  
 if "pickup_ticket" not in st.session_state:
     st.session_state.pickup_ticket = None
 
@@ -99,12 +99,10 @@ def start_session():
     st.session_state.speak_greeting = greeting  
 
 def process_claim():
-    # Generate scheduled pickup time (e.g., 30 minutes from now)
     pickup_time = (datetime.now() + timedelta(minutes=30)).strftime("%I:%M %p")
     st.session_state.pickup_ticket = {
         "time": pickup_time,
-        "location": "Cultivating Community Pickup Hub (Dandelion Collective)",
-        items_claimed := list(st.session_state.basket.keys())
+        "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
     st.session_state.messages = [{"role": "system", "content": build_system_prompt()}]
     st.session_state.audio_key += 1
@@ -138,7 +136,6 @@ if st.sidebar.button("Add Item"):
     matched = next((i for i in inventory_items if i['item_name'] == selected_item), None)
     if matched:
         cat = matched['category']
-        # Enforce max 3 items per category rule
         cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
         if cat_count + add_qty <= 3:
             st.session_state.basket[selected_item] = {"category": cat, "quantity": add_qty}
