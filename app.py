@@ -54,23 +54,24 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic Non-Profit System Prompt with Basket & Inventory Rules
+# 5. Dynamic Non-Profit System Prompt with Persona and Basket Parsing Rules
 def build_system_prompt():
     inventory_data = get_pantry_inventory()
     basket_data = st.session_state.get("basket", {})
     prompt = (
-        "You are Monique, the empathetic, efficient Floor Manager for Cultivating Community, a community food pantry in Washington, D.C.\n\n"
+        "You are Monique, the warm, nurturing, and efficient Floor Manager for Cultivating Community, a community food pantry in Washington, D.C. "
+        "Your voice and tone are that of a grounded, caring Black woman—welcoming, respectful, community-oriented, and real (using warm expressions like 'Hey honey', 'Got you covered', or 'Fam' naturally when appropriate).\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
         f"{inventory_data}\n\n"
         "CURRENT VISITOR BASKET:\n"
         f"{basket_data}\n\n"
         "NON-PROFIT OPERATIONAL RULES:\n"
         "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. All food is completely free of charge.\n"
-        "2. BASKET RULES & LIMITS: Visitors can build a basket by choosing up to 3 items from each food department (category, such as Produce, Bakery, Canned Goods, Pantry Staples, Prepared Meals). Guide them on what departments are available and what they've added.\n"
+        "2. AUTO-ADD & BASKET LIMITS: Visitors can choose up to 3 items from each food department. If they request an item (like fresh apples, bread, or hot meals), acknowledge it warmly and let them know it's being added or has been added to their cart/basket.\n"
         "3. ACCURATE STOCK & DIALECT FLEXIBILITY: Accurately answer what items we have in stock using ONLY the live inventory database. Understand slang, Ebonics, different dialects, or other languages semantically.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.\n"
         "5. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.\n"
-        "6. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Direct visitors to review their basket on the sidebar and tap the green 'Claim Ration' button to lock in their pickup time."
+        "6. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Direct visitors to check their basket on the sidebar and tap the green 'Claim Ration' button to lock in their pickup time."
     )
     return prompt
 
@@ -93,7 +94,7 @@ if "pickup_ticket" not in st.session_state:
 # 7. Button Callback Logic
 def start_session():
     st.session_state.session_active = True
-    greeting = "Hi, I'm Monique. You can pick up to 3 items from each food department today. What would you like to add to your basket?"
+    greeting = "Hey honey! Welcome to Cultivating Community. You can pick up to 3 items from each food department today—what can I add to your basket?"
     st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
     st.session_state.messages.append({"role": "assistant", "content": greeting})
     st.session_state.speak_greeting = greeting  
@@ -109,6 +110,19 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.session_active = False
     st.session_state.basket = {}
+
+# Helper function to auto-add items based on user utterance
+def check_and_auto_add_cart(user_text, inventory_items):
+    text_lower = user_text.lower()
+    for item in inventory_items:
+        iname = item['item_name']
+        if iname.lower() in text_lower or any(word in text_lower for word in iname.lower().split()):
+            cat = item['category']
+            current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
+            cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
+            if cat_count + 1 <= 3 and current_qty < 5:
+                st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
+                break
 
 # 8. Main UI  
 st.title("Community Pantry Kiosk")
@@ -126,7 +140,7 @@ if st.session_state.basket:
         st.session_state.basket = {}
         st.rerun()
 else:
-    st.sidebar.info("Your basket is empty. Ask Monique to add items or select them below!")
+    st.sidebar.info("Your basket is empty. Tell Monique what you need or select below!")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Quick Add to Basket")
@@ -184,7 +198,10 @@ else:
                     with st.chat_message("user"):
                         st.markdown(user_text)
 
-                    # Generate AI Response with live Supabase inventory and basket context
+                    # Auto-add items requested by user to basket
+                    check_and_auto_add_cart(user_text, inventory_items)
+
+                    # Generate AI Response with live Supabase inventory and updated basket context
                     with st.chat_message("assistant"):
                         with st.spinner("Processing..."):
                             completion = client.chat.completions.create(
