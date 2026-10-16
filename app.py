@@ -41,7 +41,6 @@ def get_pantry_inventory():
 
 def get_total_distributed():
     """Tracks daily claims using a lightweight metadata table or local state fallback."""
-    # We can query total remaining or handle distribution counts dynamically
     inventory = get_pantry_inventory()
     total_stock = sum([item.get('quantity', 0) for item in inventory])
     return total_stock
@@ -69,33 +68,4 @@ LIVE PANTRY INVENTORY DATABASE:
 {inventory_data}
 
 NON-PROFIT OPERATIONAL RULES:
-1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. If someone asks to buy an item or ask about cost, warmly clarify that all food is completely free of charge.
-2. ACCURATE STOCK & DIALECT FLEXIBILITY: Accurately answer what items we have in stock using ONLY the live inventory database above. If someone asks using slang, Ebonics, different dialects, or another language (like Spanish), understand their intent semantically and match it to our inventory items (such as Call Your Mother bakery items, fresh produce, canned goods, staples, or our two hot prepared options: Curry and Corned Beef Sandwiches).
-3. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.
-4. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.
-5. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm sentences. Always direct visitors to tap the green 'Claim Ration' button on the screen to receive their package today."""
-
-# 6. Smooth State Management Initialization
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": build_system_prompt()}]
-if "audio_key" not in st.session_state:
-    st.session_state.audio_key = 0
-if "claim_success" not in st.session_state:
-    st.session_state.claim_success = False
-if "session_active" not in st.session_state:
-    st.session_state.session_active = False
-if "speak_greeting" not in st.session_state:
-    st.session_state.speak_greeting = False
-
-# 7. Button Callback Logic
-def start_session():
-    st.session_state.session_active = True
-    greeting = "Hi, I'm Monique. How can I help you today?"
-    # Update system prompt with fresh inventory on session start
-    st.session_state.messages[0] = {"role": "system", "content": build_system_prompt()}
-    st.session_state.messages.append({"role": "assistant", "content": greeting})
-    st.session_state.speak_greeting = greeting  
-
-def process_claim():
-    # Reset conversation and trigger success state for the next visitor
-    st.session_state.messages = [{"role": "system", "content": build_system_prompt()
+1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. If someone asks to buy an item or
