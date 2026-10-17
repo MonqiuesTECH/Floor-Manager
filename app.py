@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. Secure Secret Configuration (No UI Inputs)
+# 2. Secure Secret Configuration
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
@@ -25,9 +25,8 @@ client = OpenAI(
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory & Lightweight Basket Logging
+# 3. Supabase Inventory & Basket Logging
 def get_pantry_inventory():
-    """Fetches the live inventory items from Supabase."""
     try:
         response = supabase.table("inventory").select("*").execute()
         return response.data
@@ -35,7 +34,6 @@ def get_pantry_inventory():
         return []
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
-    """Saves the basket using lightweight JSONB storage."""
     try:
         supabase.table("baskets").insert({
             "items": basket_data,
@@ -45,9 +43,8 @@ def save_basket_to_supabase(basket_data, pickup_ticket):
     except Exception as e:
         print(f"Error saving basket to Supabase: {e}")
 
-# 4. Zero-Cost Browser Text-to-Speech JS Injection (Asterisk Fix)
+# 4. Zero-Cost Browser Text-to-Speech JS Injection
 def speak_text(text):
-    # Strip out markdown symbols like *, _, and # so the voice doesn't read them out loud
     clean_text = re.sub(r'[*_#]', '', text)
     clean_text = clean_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
     
@@ -62,7 +59,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic Non-Profit System Prompt with Michelle Obama Persona & Live Basket
+# 5. Dynamic System Prompt
 def build_system_prompt():
     inventory_data = get_pantry_inventory()
     basket_data = st.session_state.get("basket", {})
@@ -115,32 +112,34 @@ def process_claim():
         "time": pickup_time,
         "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
-    
     save_basket_to_supabase(st.session_state.basket, ticket)
-    
     st.session_state.pickup_ticket = ticket
     st.session_state.claim_success = True
     st.session_state.basket = {}
 
-# Helper function to auto-add items (Singular/Plural Match Fix)
+# Advanced NLP Item Parsing & Limit Detection
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
     added = []
+    rejected = []
     
     for item in inventory_items:
         iname = item['item_name']
         iname_lower = iname.lower()
         
-        # Extract significant words and check base root (e.g. 'apples' -> 'apple', 'bagels' -> 'bagel')
-        key_words = [w for w in iname_lower.split() if len(w) > 3]
+        # Filter out common filler words to prevent false triggers
+        stop_words = {'fresh', 'canned', 'bags', 'bundles', 'artisan', 'call', 'your', 'mother', 'and', 'the', 'with', 'some'}
+        key_words = [w for w in iname_lower.split() if w not in stop_words and len(w) > 2]
         
         matched = False
         if iname_lower in text_lower:
             matched = True
         else:
             for kw in key_words:
-                base_word = kw.rstrip('s') # Match singular words in user input
-                if base_word in text_lower:
+                base_word = kw.rstrip('s')
+                # Strict regex boundary match for singular and plural
+                pattern = r'\b' + re.escape(base_word) + r'(?:s|es)?\b'
+                if re.search(pattern, text_lower):
                     matched = True
                     break
                     
@@ -152,7 +151,11 @@ def check_and_auto_add_cart(user_text, inventory_items):
             if cat_count < 3 and current_qty < 3:
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
                 added.append(iname)
-    return added
+            else:
+                # Track items blocked by the 3-item limit rule
+                rejected.append({"name": iname, "category": cat})
+                
+    return added, rejected
 
 # 8. Main UI  
 st.title("Community Pantry Kiosk")
@@ -161,7 +164,7 @@ inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 st.metric(label="Total Items Available Today", value=total_quantity)
 
-# Sidebar Basket Inspector & Manual Selector
+# Sidebar Basket Inspector
 st.sidebar.markdown("### 🛒 Your Custom Basket")
 if st.session_state.basket:
     for item_name, details in st.session_state.basket.items():
@@ -209,7 +212,7 @@ else:
         speak_text(st.session_state.speak_greeting)
         st.session_state.speak_greeting = False
 
-    # Display chat history cleanly
+    # Display chat history
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
@@ -219,13 +222,9 @@ else:
     
     user_input_text = ""
 
-    # Audio Input 
     audio_value = st.audio_input("🎤 Tap microphone to talk", key=f"mic_{st.session_state.audio_key}")
-    
-    # Text Input (has its own built-in send arrow on the right)
     chat_text = st.chat_input("✨ Or type your request here...")
 
-    # Process Input Source
     if audio_value:
         with st.spinner("Listening..."):
             try:
@@ -240,21 +239,28 @@ else:
     elif chat_text:
         user_input_text = chat_text
 
-    # Handle incoming user message & generate response
+    # Handle incoming user message
     if user_input_text:
-        # 1. Append and render user text immediately
         st.session_state.messages.append({"role": "user", "content": user_input_text})
         
-        # 2. Check for basket additions
-        check_and_auto_add_cart(user_input_text, inventory_items)
+        # Auto-parse items and detect limit rejections
+        added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
         
-        # 3. Render Assistant Response with a locked loading spinner
+        # Provide strict AI context on limits so she explains gracefully
+        if rejected_items:
+            rej_names = [r["name"] for r in rejected_items]
+            rej_cat = rejected_items[0]["category"]
+            sys_note = (
+                f"[SYSTEM ALERT: The visitor tried to add {', '.join(rej_names)}, but they already have 3 items in the '{rej_cat}' department. "
+                f"You MUST explicitly tell them they cannot add any more {rej_cat} items, but warmly suggest they choose items from other available departments.]"
+            )
+            st.session_state.messages.append({"role": "system", "content": sys_note})
+            
         with st.chat_message("user"):
             st.markdown(user_input_text)
             
         with st.chat_message("assistant"):
-            with st.spinner("Monique is gathering your items..."):
-                # Always ensure system prompt knows the latest basket state
+            with st.spinner("Monique is reviewing your basket..."):
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
                     st.session_state.messages[0]["content"] = build_system_prompt()
                 else:
@@ -269,9 +275,8 @@ else:
                     )
                     response_text = completion.choices[0].message.content
                     
-                    # Fallback in case the model returns an empty string
                     if not response_text or not response_text.strip():
-                        response_text = "I've updated your basket. Is there anything else you'd like to add today?"
+                        response_text = "I've reviewed your basket. Is there anything else you'd like to add today?"
                         
                     st.markdown(response_text)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
@@ -280,13 +285,11 @@ else:
                 except Exception as e:
                     st.error(f"Connection issue: {e}")
                     
-        # Cleanly rerun to refresh the sidebar and reset audio
         st.session_state.audio_key += 1
         st.rerun()
 
     st.divider()
 
-    # Single-Click Claim Button
     st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
 
     if not st.session_state.basket:
