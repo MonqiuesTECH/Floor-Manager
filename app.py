@@ -7,7 +7,7 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 
 # 1. Page Configuration
-st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
+st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="wide")
 
 # 2. Secure Secret Configuration
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
@@ -59,7 +59,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Out-of-Stock Handlers
+# 5. Dynamic System Prompt
 def build_system_prompt(dynamic_alert=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -93,7 +93,7 @@ def build_system_prompt(dynamic_alert=""):
         f"{allowance_text}"
         f"{alert_section}"
         "NON-PROFIT OPERATIONAL RULES:\n"
-        "1. OUT OF STOCK ITEMS: If the visitor asks for an item (like bananas, oranges, etc.) that is NOT in the LIVE PANTRY INVENTORY DATABASE, you MUST politely inform them that we do not have it today, and immediately suggest 2 specific alternatives from the database that we DO have.\n"
+        "1. OUT OF STOCK ITEMS: If the visitor asks for an item that is NOT in the LIVE PANTRY INVENTORY DATABASE, politely inform them that we do not have it today, and immediately suggest 2 specific alternatives from the database that we DO have.\n"
         "2. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
         "3. LIMITS: If asked what they can add, check 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know gently and suggest another department.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses.\n"
@@ -138,21 +138,18 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.basket = {}
 
-# NLP Parsing
+# NLP Parsing & Adding Logic
 def extract_quantity(text_lower, item_keywords):
     num_map = {"one": 1, "two": 2, "three": 3, "1": 1, "2": 2, "3": 3}
     words = text_lower.split()
-    
     for i, word in enumerate(words):
         for kw in item_keywords:
             if kw in word:
                 if i > 0 and words[i-1] in num_map:
                     return num_map[words[i-1]]
-    
     for num_str, val in num_map.items():
         if re.search(r'\b' + num_str + r'\b', text_lower):
             return val
-            
     return 1 
 
 def check_and_auto_add_cart(user_text, inventory_items):
@@ -198,111 +195,126 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 
     return added, rejected
 
-# 8. Main UI  
-st.title("Community Pantry Kiosk")
+# 8. Main UI Layout (Visual Grid + Sidebar POS Style)
+st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
-st.metric(label="Total Items Available Today", value=total_quantity)
 
-# Sidebar Basket Inspector
-st.sidebar.markdown("### 🛒 Your Custom Basket")
-if st.session_state.basket:
-    for item_name, details in st.session_state.basket.items():
-        st.sidebar.text(f"• {item_name} (Qty: {details['quantity']})")
-    if st.sidebar.button("Clear Basket"):
-        st.session_state.basket = {}
-        st.rerun()
-else:
-    st.sidebar.info("Your basket is empty. Let Monique know what you would like to select!")
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Quick Add to Basket")
-selected_item = st.sidebar.selectbox("Select pantry item:", [i['item_name'] for i in inventory_items] if inventory_items else [])
-add_qty = st.sidebar.number_input("Quantity", min_value=1, max_value=3, value=1)
-if st.sidebar.button("Add Item"):
-    matched = next((i for i in inventory_items if i['item_name'] == selected_item), None)
-    if matched:
-        cat = matched['category']
-        cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
-        if cat_count + add_qty <= 3:
-            current_q = st.session_state.basket.get(selected_item, {}).get("quantity", 0)
-            st.session_state.basket[selected_item] = {"category": cat, "quantity": current_q + add_qty}
-            st.success(f"Added {add_qty}x {selected_item} to basket!")
+# Sidebar: Basket & Summary
+with st.sidebar:
+    st.markdown("### 🛒 Your Custom Basket")
+    if st.session_state.basket:
+        for item_name, details in st.session_state.basket.items():
+            st.text(f"• {item_name} (Qty: {details['quantity']})")
+        if st.button("Clear Basket", use_container_width=True):
+            st.session_state.basket = {}
             st.rerun()
-        else:
-            st.sidebar.error("Limit reached: Max 3 items allowed per food department!")
+    else:
+        st.info("Your basket is empty. Select items below or talk to Monique!")
 
-if st.session_state.claim_success and st.session_state.pickup_ticket:
-    ticket = st.session_state.pickup_ticket
-    st.success(f"✅ Ration successfully claimed! Please pick up your basket at **{ticket['time']}** today at **{ticket['location']}**.")
-    if st.button("Start New Visit"):
-        st.session_state.claim_success = False
-        st.session_state.pickup_ticket = None
-        st.session_state.session_active = False
-        st.session_state.messages = []
-        st.rerun()
-
-# 9. Session Routing: Start Screen vs Active Chat
-if not st.session_state.session_active:
-    st.write("---")
-    st.button("👋 Press to Begin", on_click=start_session, use_container_width=True, type="primary")
-
-else:
-    if st.session_state.speak_greeting:
-        speak_text(st.session_state.speak_greeting)
-        st.session_state.speak_greeting = False
-
-    # Render previous messages (skip system prompts)
-    for msg in st.session_state.messages:
-        if msg["role"] != "system":
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-    st.markdown("### 💬 Talk or Type to Monique")
+    st.markdown("---")
+    st.metric(label="Total Pantry Stock Available", value=total_quantity)
     
-    user_input_text = ""
+    if st.session_state.claim_success and st.session_state.pickup_ticket:
+        ticket = st.session_state.pickup_ticket
+        st.success(f"✅ Claimed! Pick up at **{ticket['time']}** at **{ticket['location']}**.")
+        if st.button("Start New Visit", use_container_width=True):
+            st.session_state.claim_success = False
+            st.session_state.pickup_ticket = None
+            st.session_state.session_active = False
+            st.session_state.messages = []
+            st.rerun()
+    else:
+        st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
 
-    audio_value = st.audio_input("🎤 Tap microphone to talk", key=f"mic_{st.session_state.audio_key}")
-    chat_text = st.chat_input("✨ Or type your request here...")
+# Main Body Split: Left = Visual Grid of Inventory Cards, Right = Monique Chat
+col_grid, col_chat = st.columns([1.2, 1])
 
-    if audio_value:
-        with st.spinner("Listening..."):
-            try:
-                transcription = client.audio.transcriptions.create(
-                    file=("audio.wav", audio_value.read()),
-                    model="whisper-large-v3-turbo",
-                    response_format="text"
+with col_grid:
+    st.markdown("### 📦 Available Pantry Inventory")
+    if not inventory_items:
+        st.warning("No inventory loaded in Supabase yet.")
+    else:
+        # Display items in a responsive 3-column card grid
+        cols = st.columns(3)
+        for index, item in enumerate(inventory_items):
+            with cols[index % 3]:
+                with st.container(border=True):
+                    st.markdown(f"**{item['item_name']}**")
+                    st.caption(f"Category: {item['category']}")
+                    st.markdown(f"Stock: **{item['quantity']} {item['unit']}**")
+                    
+                    if st.button("Add 1", key=f"grid_add_{item['id']}", use_container_width=True):
+                        if not st.session_state.session_active:
+                            start_session()
+                        cat = item['category']
+                        iname = item['item_name']
+                        current_q = st.session_state.basket.get(iname, {}).get("quantity", 0)
+                        cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
+                        
+                        if cat_count < 3 and current_q < 3:
+                            st.session_state.basket[iname] = {"category": cat, "quantity": current_q + 1}
+                            st.success(f"Added {iname}!")
+                            st.rerun()
+                        else:
+                            st.error("Limit reached (Max 3 per department)!")
+
+with col_chat:
+    st.markdown("### 💬 Monique (Virtual Floor Manager)")
+    
+    if not st.session_state.session_active:
+        st.info("Tap the button below to start your conversation with Monique.")
+        st.button("👋 Press to Begin Session", on_click=start_session, use_container_width=True, type="primary")
+    else:
+        if st.session_state.speak_greeting:
+            speak_text(st.session_state.speak_greeting)
+            st.session_state.speak_greeting = False
+
+        # Render chat messages container
+        chat_container = st.container(height=400)
+        with chat_container:
+            for msg in st.session_state.messages:
+                if msg["role"] != "system":
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+
+        # Input controls
+        user_input_text = ""
+        audio_value = st.audio_input("🎤 Tap to talk", key=f"mic_{st.session_state.audio_key}")
+        chat_text = st.chat_input("✨ Or type your request...")
+
+        if audio_value:
+            with st.spinner("Listening..."):
+                try:
+                    transcription = client.audio.transcriptions.create(
+                        file=("audio.wav", audio_value.read()),
+                        model="whisper-large-v3-turbo",
+                        response_format="text"
+                    )
+                    user_input_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
+                except Exception as e:
+                    st.error(f"Transcription error: {e}")
+        elif chat_text:
+            user_input_text = chat_text
+
+        if user_input_text:
+            if len(st.session_state.messages) > 11:
+                st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
+
+            st.session_state.messages.append({"role": "user", "content": user_input_text})
+            added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
+            
+            dynamic_context = ""
+            if rejected_items:
+                rej_names = [r["name"] for r in rejected_items]
+                rej_cat = rejected_items[0]["category"]
+                dynamic_context = (
+                    f"The visitor just tried to add {', '.join(rej_names)}, but they already hit their 3-item limit for the '{rej_cat}' department. "
+                    f"You MUST explicitly tell them they cannot add any more {rej_cat} items right now, and suggest something else."
                 )
-                user_input_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
-            except Exception as e:
-                st.error(f"Transcription error: {e}")
-    elif chat_text:
-        user_input_text = chat_text
-
-    if user_input_text:
-        # Keep chat history lean to prevent AI confusion (keep last 10 messages + 1 system)
-        if len(st.session_state.messages) > 11:
-            st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
-
-        st.session_state.messages.append({"role": "user", "content": user_input_text})
-        added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
-        
-        dynamic_context = ""
-        if rejected_items:
-            rej_names = [r["name"] for r in rejected_items]
-            rej_cat = rejected_items[0]["category"]
-            dynamic_context = (
-                f"The visitor just tried to add {', '.join(rej_names)}, but they already hit their 3-item limit for the '{rej_cat}' department. "
-                f"You MUST explicitly tell them they cannot add any more {rej_cat} items right now, and suggest something else."
-            )
-            
-        with st.chat_message("user"):
-            st.markdown(user_input_text)
-            
-        with st.chat_message("assistant"):
-            with st.spinner("Monique is reviewing your basket..."):
-                # Always ensure system prompt is at index 0 and fully updated
+                
+            with st.spinner("Monique is responding..."):
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
                     st.session_state.messages[0]["content"] = build_system_prompt(dynamic_context)
                 else:
@@ -312,30 +324,19 @@ else:
                     completion = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=st.session_state.messages,
-                        temperature=0.4, # Slightly higher temp to prevent repetitive loops
-                        max_tokens=250   # Increased max tokens so she never cuts off
+                        temperature=0.4,
+                        max_tokens=250
                     )
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
                         response_text = "I'm sorry, I didn't quite catch that. Could you please repeat what you'd like to add to your basket?"
                         
-                    st.markdown(response_text)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
                     st.session_state.speak_greeting = response_text
                     
                 except Exception as e:
                     st.error(f"Connection issue: {e}")
-                    
-        st.session_state.audio_key += 1
-        st.rerun()
-
-    st.divider()
-
-    st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
-
-    if not st.session_state.basket:
-        st.warning("Add at least one item to your basket before claiming your ration.")
-
-    if total_quantity <= 0:
-        st.error("Daily rations are currently empty for today.")
+                        
+            st.session_state.audio_key += 1
+            st.rerun()
