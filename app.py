@@ -58,7 +58,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Explicit Inventory-Listing Rules
+# 5. Dynamic System Prompt with Strict Non-Auto-Add Suggestion Logic
 def build_system_prompt(transaction_report=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -91,9 +91,9 @@ def build_system_prompt(transaction_report=""):
         f"{allowance_text}"
         f"{transaction_section}"
         "CONVERSATIONAL RULES:\n"
-        "1. LISTING AVAILABLE ITEMS: If the visitor asks 'What else is available?', 'What do you have?', or asks to see items, you MUST explicitly name 3 to 4 specific items currently present in the LIVE PANTRY INVENTORY DATABASE, categorized by their departments.\n"
-        "2. ACKNOWLEDGE ACTION: If items were successfully added in the action report, warmly confirm them. If items were rejected because a department is full (0 remaining), gently explain that the department limit has been reached.\n"
-        "3. OUT OF STOCK: If they request an item not in our inventory database, politely let them know and offer a similar alternative we do have.\n"
+        "1. NEVER AUTO-ADD OR MODIFY BASKET ON GENERAL QUESTIONS: If the visitor asks 'What else can I add?', 'What's available?', or 'What do you have?', DO NOT modify or add items to their basket. Your only job on these queries is to review their current basket, check the remaining department allowances, and verbally suggest available items from departments where they still have space.\n"
+        "2. ACKNOWLEDGE EXPLICIT ADDITIONS: If the visitor explicitly asks to add an item, confirm it. If a department is full (0 remaining), gently let them know.\n"
+        "3. OUT OF STOCK: If they request an item not in our inventory database, politely inform them and offer an in-stock alternative.\n"
         "4. EVERYTHING IS FREE & PRIVATE: Never mention money, prices, names, IDs, or addresses.\n"
         "5. WARM & CONCISE: Keep responses to 2-3 warm sentences. Direct them to tap 'Claim Ration' when finished."
     )
@@ -154,6 +154,12 @@ def extract_quantity(text_lower, item_keywords):
 
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
+    
+    # If the user is asking a general inquiry question, DO NOT trigger item parsing or auto-adding
+    general_inquiry_phrases = ["what else", "what can i add", "what do you have", "what's available", "what is available", "show me"]
+    if any(phrase in text_lower for phrase in general_inquiry_phrases):
+        return [], []
+
     added = []
     rejected = []
     
@@ -330,7 +336,7 @@ with col_chat:
                 rej_desc = [r['name'] for r in rejected_items]
                 report_lines.append(f"- Blocked/Rejected (Department limit of 3 reached): {', '.join(rej_desc)}")
             if not added_items and not rejected_items:
-                report_lines.append("- No specific inventory items were added or matched on this turn (general inquiry, stock question, or out-of-stock request).")
+                report_lines.append("- No items were added or modified (this was a general inquiry or advisory request).")
                 
             transaction_report = "\n".join(report_lines)
                 
@@ -351,7 +357,7 @@ with col_chat:
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
-                        response_text = "I've updated your basket selections. Let me know what else you'd like to explore today!"
+                        response_text = "I'm here to help you find whatever you need. Let me know which department you'd like to explore next!"
                         
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
                     st.session_state.speak_greeting = response_text
