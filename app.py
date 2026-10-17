@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 import streamlit.components.v1 as components
 from openai import OpenAI
@@ -8,7 +9,7 @@ from datetime import datetime, timedelta
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. Secure Secret & Database Configuration
+# 2. Secure Secret Configuration (No UI Inputs)
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
@@ -34,10 +35,7 @@ def get_pantry_inventory():
         return []
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
-    """
-    Saves the basket using lightweight JSONB storage. 
-    Extremely storage-efficient for Supabase Free Tier.
-    """
+    """Saves the basket using lightweight JSONB storage."""
     try:
         supabase.table("baskets").insert({
             "items": basket_data,
@@ -47,9 +45,12 @@ def save_basket_to_supabase(basket_data, pickup_ticket):
     except Exception as e:
         print(f"Error saving basket to Supabase: {e}")
 
-# 4. Zero-Cost Browser Text-to-Speech JS Injection
+# 4. Zero-Cost Browser Text-to-Speech JS Injection (Asterisk Fix)
 def speak_text(text):
-    clean_text = text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+    # Strip out markdown symbols like *, _, and # so the voice doesn't read them out loud
+    clean_text = re.sub(r'[*_#]', '', text)
+    clean_text = clean_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
+    
     js_code = (
         "<script>\n"
         "if ('speechSynthesis' in window) {\n"
@@ -115,23 +116,35 @@ def process_claim():
         "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
     
-    # Save the current basket snapshot to the Supabase baskets table
     save_basket_to_supabase(st.session_state.basket, ticket)
     
     st.session_state.pickup_ticket = ticket
     st.session_state.claim_success = True
     st.session_state.basket = {}
 
-# Helper function to auto-add multiple items based on user utterance
+# Helper function to auto-add items (Singular/Plural Match Fix)
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
     added = []
+    
     for item in inventory_items:
         iname = item['item_name']
-        key_words = [w.lower() for w in iname.split() if len(w) > 3]
-        matched_keyword = any(kw in text_lower for kw in key_words)
+        iname_lower = iname.lower()
         
-        if iname.lower() in text_lower or matched_keyword:
+        # Extract significant words and check base root (e.g. 'apples' -> 'apple')
+        key_words = [w for w in iname_lower.split() if len(w) > 3]
+        
+        matched = False
+        if iname_lower in text_lower:
+            matched = True
+        else:
+            for kw in key_words:
+                base_word = kw.rstrip('s') # Match singular words in user input
+                if base_word in text_lower:
+                    matched = True
+                    break
+                    
+        if matched:
             cat = item['category']
             current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
             cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
