@@ -245,7 +245,7 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 
     return added, rejected
 
-# 8. Main UI Layout (Public Shopper Kiosk vs Secure Admin Portal)
+# 8. Main UI Layout
 st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 
 inventory_items = get_pantry_inventory()
@@ -322,7 +322,6 @@ with st.sidebar:
                 st.session_state.messages = []
                 st.rerun()
         else:
-            # Claim options: Standard Free Pickup vs $30 D.C. Special Delivery
             st.markdown("### 🚚 Fulfillment Options")
             fulfillment_type = st.radio("Choose Mode:", ["Pickup (Free)", "Delivery within DC ($30 Fee)"])
             
@@ -420,13 +419,12 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
             if submit_rescue:
                 st.success(f"Successfully logged rescue drop from {rescue_source}!")
 else:
-    # Public Shopper View with Dietary Filters
+    # Public Shopper View: Catalog Grid on Left, Monique Chat on Right
     col_grid, col_chat = st.columns([1.2, 1])
 
     with col_grid:
         st.markdown("### 📦 Available Pantry Inventory")
         
-        # Dietary & Allergenic Quick Filter Bar
         dietary_filter = st.selectbox(
             "Filter by Dietary Need / Health Preference:", 
             ["All Items", "Gluten-Free", "Vegan / Vegetarian", "Halal", "Diabetic-Friendly"]
@@ -435,11 +433,9 @@ else:
         if not inventory_items:
             st.warning("No inventory loaded in Supabase yet.")
         else:
-            # Filter logic matching dietary tags or keywords
             filtered_inventory = []
             for item in inventory_items:
                 iname = item['item_name'].lower()
-                cat = item['category'].lower()
                 
                 if dietary_filter == "Gluten-Free" and not any(k in iname for k in ['oatmeal', 'rice', 'apple', 'spinach', 'kale', 'orange', 'fruit']):
                     continue
@@ -476,7 +472,7 @@ else:
                                     st.error("Limit reached (Max 3 per department)!")
 
         st.markdown("---")
-        st.markdown("ℹ️ **Community Dignity Note**: All fresh food, staples, and prepared meals are 100% free of charge. Specialized courier delivery is available for $30 for elderly or mobility-impaired D.C. residents.")
+        st.info("ℹ️ **Community Dignity Note**: All fresh food, staples, and prepared meals are 100% free of charge. Specialized courier delivery is available for $30 for elderly or mobility-impaired D.C. residents.")
 
     with col_chat:
         st.markdown("### 💬 Monique (Virtual Floor Manager)")
