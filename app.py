@@ -58,7 +58,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Precise Transaction Feedback
+# 5. Dynamic System Prompt with Explicit Inventory-Listing Rules
 def build_system_prompt(transaction_report=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -91,8 +91,8 @@ def build_system_prompt(transaction_report=""):
         f"{allowance_text}"
         f"{transaction_section}"
         "CONVERSATIONAL RULES:\n"
-        "1. ACKNOWLEDGE ACTION: If items were successfully added in the action report, warmly confirm them. If items were rejected because a department is full (0 remaining), gently explain that the department limit has been reached.\n"
-        "2. SUGGESTIONS: Always look at the remaining allowances. Tell the visitor what departments still have space and suggest specific items from those departments that are in stock.\n"
+        "1. LISTING AVAILABLE ITEMS: If the visitor asks 'What else is available?', 'What do you have?', or asks to see items, you MUST explicitly name 3 to 4 specific items currently present in the LIVE PANTRY INVENTORY DATABASE, categorized by their departments.\n"
+        "2. ACKNOWLEDGE ACTION: If items were successfully added in the action report, warmly confirm them. If items were rejected because a department is full (0 remaining), gently explain that the department limit has been reached.\n"
         "3. OUT OF STOCK: If they request an item not in our inventory database, politely let them know and offer a similar alternative we do have.\n"
         "4. EVERYTHING IS FREE & PRIVATE: Never mention money, prices, names, IDs, or addresses.\n"
         "5. WARM & CONCISE: Keep responses to 2-3 warm sentences. Direct them to tap 'Claim Ration' when finished."
@@ -205,7 +205,6 @@ total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 with st.sidebar:
     st.markdown("### 🛒 Your Custom Basket")
     if st.session_state.basket:
-        # Group items by category for clean department organization
         grouped_basket = {}
         for item_name, details in st.session_state.basket.items():
             cat = details['category']
@@ -331,7 +330,7 @@ with col_chat:
                 rej_desc = [r['name'] for r in rejected_items]
                 report_lines.append(f"- Blocked/Rejected (Department limit of 3 reached): {', '.join(rej_desc)}")
             if not added_items and not rejected_items:
-                report_lines.append("- No specific inventory items were added or matched on this turn (general inquiry or out-of-stock request).")
+                report_lines.append("- No specific inventory items were added or matched on this turn (general inquiry, stock question, or out-of-stock request).")
                 
             transaction_report = "\n".join(report_lines)
                 
