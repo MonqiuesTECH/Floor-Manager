@@ -131,7 +131,7 @@ def check_and_auto_add_cart(user_text, inventory_items):
         iname = item['item_name']
         iname_lower = iname.lower()
         
-        # Extract significant words and check base root (e.g. 'apples' -> 'apple')
+        # Extract significant words and check base root (e.g. 'apples' -> 'apple', 'bagels' -> 'bagel')
         key_words = [w for w in iname_lower.split() if len(w) > 3]
         
         matched = False
@@ -153,26 +153,6 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
                 added.append(iname)
     return added
-
-# Function to handle AI response generation smoothly
-def generate_monique_response():
-    if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
-        st.session_state.messages[0]["content"] = build_system_prompt()
-    else:
-        st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt()})
-
-    try:
-        completion = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
-            messages=st.session_state.messages,
-            temperature=0.3,
-            max_tokens=150
-        )
-        response_text = completion.choices[0].message.content
-        st.session_state.messages.append({"role": "assistant", "content": response_text})
-        st.session_state.speak_greeting = response_text
-    except Exception as e:
-        st.error(f"Connection issue: {e}")
 
 # 8. Main UI  
 st.title("Community Pantry Kiosk")
@@ -237,18 +217,15 @@ else:
 
     st.markdown("### 💬 Talk or Type to Monique")
     
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        audio_value = st.audio_input("Tap microphone to talk", key=f"mic_{st.session_state.audio_key}")
-    
-    with col2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        text_submit_btn = st.button("✨ Ask Monique", type="secondary", use_container_width=True)
+    user_input_text = ""
 
-    user_text = st.chat_input("Type what you need here...")
+    # Audio Input 
+    audio_value = st.audio_input("🎤 Tap microphone to talk", key=f"mic_{st.session_state.audio_key}")
+    
+    # Text Input (has its own built-in send arrow on the right)
+    chat_text = st.chat_input("✨ Or type your request here...")
 
-    # Process Audio Input
+    # Process Input Source
     if audio_value:
         with st.spinner("Listening..."):
             try:
@@ -257,20 +234,53 @@ else:
                     model="whisper-large-v3-turbo",
                     response_format="text"
                 )
-                user_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
+                user_input_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
             except Exception as e:
                 st.error(f"Transcription error: {e}")
+    elif chat_text:
+        user_input_text = chat_text
 
-    # Handle incoming user message
-    if user_text:
-        st.session_state.messages.append({"role": "user", "content": user_text})
+    # Handle incoming user message & generate response
+    if user_input_text:
+        # 1. Append and render user text immediately
+        st.session_state.messages.append({"role": "user", "content": user_input_text})
         
-        # Auto-add requested items to basket
-        check_and_auto_add_cart(user_text, inventory_items)
+        # 2. Check for basket additions
+        check_and_auto_add_cart(user_input_text, inventory_items)
         
-        # Generate Monique's response
-        generate_monique_response()
-        
+        # 3. Render Assistant Response with a locked loading spinner
+        with st.chat_message("user"):
+            st.markdown(user_input_text)
+            
+        with st.chat_message("assistant"):
+            with st.spinner("Monique is gathering your items..."):
+                # Always ensure system prompt knows the latest basket state
+                if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
+                    st.session_state.messages[0]["content"] = build_system_prompt()
+                else:
+                    st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt()})
+                
+                try:
+                    completion = client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=st.session_state.messages,
+                        temperature=0.3,
+                        max_tokens=150
+                    )
+                    response_text = completion.choices[0].message.content
+                    
+                    # Fallback in case the model returns an empty string
+                    if not response_text or not response_text.strip():
+                        response_text = "I've updated your basket. Is there anything else you'd like to add today?"
+                        
+                    st.markdown(response_text)
+                    st.session_state.messages.append({"role": "assistant", "content": response_text})
+                    st.session_state.speak_greeting = response_text
+                    
+                except Exception as e:
+                    st.error(f"Connection issue: {e}")
+                    
+        # Cleanly rerun to refresh the sidebar and reset audio
         st.session_state.audio_key += 1
         st.rerun()
 
