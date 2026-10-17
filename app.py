@@ -21,13 +21,25 @@ client = OpenAI(
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory & Basket Logging
+# 3. Supabase Inventory, Basket, & Admin Log Retrieval
 def get_pantry_inventory():
     try:
         response = supabase.table("inventory").select("*").execute()
         return response.data
     except Exception as e:
         return []
+
+def get_all_baskets():
+    try:
+        response = supabase.table("baskets").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        # Fallback if created_at column doesn't exist
+        try:
+            response = supabase.table("baskets").select("*").execute()
+            return response.data
+        except:
+            return []
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
     try:
@@ -114,6 +126,8 @@ if "basket" not in st.session_state:
     st.session_state.basket = {}  
 if "pickup_ticket" not in st.session_state:
     st.session_state.pickup_ticket = None
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
 
 # 7. Button Callback Logic
 def start_session():
@@ -138,7 +152,6 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.basket = {}
     
-    # Vocalize closing script instantly upon claiming
     closing_speech = f"Please scan the QR code for your anonymous ticket, and your pickup time is {ticket['time']} at Cultivating Community. Thank you for shopping with us. Hope to see you soon."
     st.session_state.speak_greeting = closing_speech
 
@@ -204,169 +217,230 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 
     return added, rejected
 
-# 8. Main UI Layout (Visual Grid + Categorized Sidebar POS Style)
+# 8. Main UI Layout (Public Shopper Kiosk vs Secure Admin Portal)
 st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar: Categorized Basket Inspector & QR Ticket
+# Sidebar Navigation: Public Shopper controls vs Admin Portal Login
 with st.sidebar:
-    st.markdown("### 🛒 Your Custom Basket")
-    if st.session_state.basket:
-        grouped_basket = {}
-        for item_name, details in st.session_state.basket.items():
-            cat = details['category']
-            if cat not in grouped_basket:
-                grouped_basket[cat] = []
-            grouped_basket[cat].append((item_name, details['quantity']))
-            
-        for cat, items in grouped_basket.items():
-            st.markdown(f"**📂 {cat}**")
-            for item_name, qty in items:
-                st.text(f"  • {item_name} (Qty: {qty})")
-                
-        st.markdown("")
-        if st.button("Clear Basket", use_container_width=True):
-            st.session_state.basket = {}
-            st.rerun()
-    else:
-        st.info("Your basket is empty. Select items below or talk to Monique!")
-
+    st.markdown("### 🔐 Portal Navigation")
+    portal_mode = st.radio("Select View:", ["🛍️ Shopper Kiosk", "🛠️ Admin Portal (Volunteers)"])
     st.markdown("---")
-    st.metric(label="Total Pantry Stock Available", value=total_quantity)
-    
-    if st.session_state.claim_success and st.session_state.pickup_ticket:
-        ticket = st.session_state.pickup_ticket
-        st.success(f"✅ Ration Claimed Successfully!")
-        st.markdown(f"🕒 **Pickup Time:** {ticket['time']}")
-        st.markdown(f"📍 **Location:** {ticket['location']}")
-        
-        qr_data = f"Cultivating-Community-Ticket-{ticket['id']}"
-        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={qr_data}"
-        st.image(qr_url, caption=f"Scan to Verify (ID: {ticket['id']})", width=180)
-        st.caption("🔒 100% Anonymous: No personal information was collected.")
 
-        if st.button("Start New Visit", use_container_width=True):
-            st.session_state.claim_success = False
-            st.session_state.pickup_ticket = None
-            st.session_state.session_active = False
-            st.session_state.messages = []
-            st.rerun()
-    else:
-        st.button("✅ Claim Ration & Get QR Code", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
-
-# Main Body Split: Left = Visual Grid of Inventory Cards, Right = Monique Chat
-col_grid, col_chat = st.columns([1.2, 1])
-
-with col_grid:
-    st.markdown("### 📦 Available Pantry Inventory")
-    if not inventory_items:
-        st.warning("No inventory loaded in Supabase yet.")
-    else:
-        cols = st.columns(3)
-        for index, item in enumerate(inventory_items):
-            with cols[index % 3]:
-                with st.container(border=True):
-                    st.markdown(f"**{item['item_name']}**")
-                    st.caption(f"Category: {item['category']}")
-                    st.markdown(f"Stock: **{item['quantity']} {item['unit']}**")
-                    
-                    if st.button("Add 1", key=f"grid_add_{item['id']}", use_container_width=True):
-                        if not st.session_state.session_active:
-                            start_session()
-                        cat = item['category']
-                        iname = item['item_name']
-                        current_q = st.session_state.basket.get(iname, {}).get("quantity", 0)
-                        cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
-                        
-                        if cat_count < 3 and current_q < 3:
-                            st.session_state.basket[iname] = {"category": cat, "quantity": current_q + 1}
-                            st.success(f"Added {iname}!")
-                            st.rerun()
-                        else:
-                            st.error("Limit reached (Max 3 per department)!")
-
-with col_chat:
-    st.markdown("### 💬 Monique (Virtual Floor Manager)")
-    
-    if not st.session_state.session_active:
-        st.info("Tap the button below to start your conversation with Monique.")
-        st.button("👋 Press to Begin Session", on_click=start_session, use_container_width=True, type="primary")
-    else:
-        if st.session_state.speak_greeting:
-            speak_text(st.session_state.speak_greeting)
-            st.session_state.speak_greeting = False
-
-        chat_container = st.container(height=400)
-        with chat_container:
-            for msg in st.session_state.messages:
-                if msg["role"] != "system":
-                    with st.chat_message(msg["role"]):
-                        st.markdown(msg["content"])
-
-        user_input_text = ""
-        audio_value = st.audio_input("🎤 Tap to talk", key=f"mic_{st.session_state.audio_key}")
-        chat_text = st.chat_input("✨ Or type your request...")
-
-        if audio_value:
-            with st.spinner("Listening..."):
-                try:
-                    transcription = client.audio.transcriptions.create(
-                        file=("audio.wav", audio_value.read()),
-                        model="whisper-large-v3-turbo",
-                        response_format="text"
-                    )
-                    user_input_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
-                except Exception as e:
-                    st.error(f"Transcription error: {e}")
-        elif chat_text:
-            user_input_text = chat_text
-
-        if user_input_text:
-            if len(st.session_state.messages) > 11:
-                st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
-
-            st.session_state.messages.append({"role": "user", "content": user_input_text})
-            
-            added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
-            
-            report_lines = []
-            if added_items:
-                added_desc = [f"{i['qty']}x {i['name']} ({i['category']})" for i in added_items]
-                report_lines.append(f"- Successfully added to basket: {', '.join(added_desc)}")
-            if rejected_items:
-                rej_desc = [r['name'] for r in rejected_items]
-                report_lines.append(f"- Blocked/Rejected (Department limit of 3 reached): {', '.join(rej_desc)}")
-            if not added_items and not rejected_items:
-                report_lines.append("- No items were added or modified (this was a general inquiry or advisory request).")
-                
-            transaction_report = "\n".join(report_lines)
-                
-            with st.spinner("Monique is responding..."):
-                system_prompt = build_system_prompt(transaction_report)
-                if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
-                    st.session_state.messages[0]["content"] = system_prompt
+    if portal_mode == "🛠️ Admin Portal (Volunteers)":
+        st.markdown("### 🔒 Staff Sign-In")
+        if not st.session_state.admin_logged_in:
+            admin_user = st.text_input("Username")
+            admin_pass = st.text_input("Password", type="password")
+            if st.button("Sign In", use_container_width=True):
+                # Simple secure credentials check for Andrew & staff
+                if admin_user == "andrew" and admin_pass == "dandelion2026":
+                    st.session_state.admin_logged_in = True
+                    st.success("Successfully logged in!")
+                    st.rerun()
                 else:
-                    st.session_state.messages.insert(0, {"role": "system", "content": system_prompt})
+                    st.error("Invalid username or password.")
+        else:
+            st.success("Signed in as Administrator")
+            if st.button("Sign Out", use_container_width=True):
+                st.session_state.admin_logged_in = False
+                st.rerun()
+
+    # If in Shopper mode, show the normal shopper sidebar
+    if portal_mode == "🛍️ Shopper Kiosk" or not st.session_state.admin_logged_in:
+        st.markdown("### 🛒 Your Custom Basket")
+        if st.session_state.basket:
+            grouped_basket = {}
+            for item_name, details in st.session_state.basket.items():
+                cat = details['category']
+                if cat not in grouped_basket:
+                    grouped_basket[cat] = []
+                grouped_basket[cat].append((item_name, details['quantity']))
                 
-                try:
-                    completion = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=st.session_state.messages,
-                        temperature=0.3,
-                        max_tokens=250
-                    )
-                    response_text = completion.choices[0].message.content
+            for cat, items in grouped_basket.items():
+                st.markdown(f"**📂 {cat}**")
+                for item_name, qty in items:
+                    st.text(f"  • {item_name} (Qty: {qty})")
                     
-                    if not response_text or not response_text.strip():
-                        response_text = "I'm here to help you find whatever you need. Let me know which department you'd like to explore next!"
+            st.markdown("")
+            if st.button("Clear Basket", use_container_width=True):
+                st.session_state.basket = {}
+                st.rerun()
+        else:
+            st.info("Your basket is empty. Select items below or talk to Monique!")
+
+        st.markdown("---")
+        st.metric(label="Total Pantry Stock Available", value=total_quantity)
+        
+        if st.session_state.claim_success and st.session_state.pickup_ticket:
+            ticket = st.session_state.pickup_ticket
+            st.success(f"✅ Ration Claimed Successfully!")
+            st.markdown(f"🕒 **Pickup Time:** {ticket['time']}")
+            st.markdown(f"📍 **Location:** {ticket['location']}")
+            
+            qr_data = f"Cultivating-Community-Ticket-{ticket['id']}"
+            qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={qr_data}"
+            st.image(qr_url, caption=f"Scan to Verify (ID: {ticket['id']})", width=180)
+            st.caption("🔒 100% Anonymous: No personal information was collected.")
+
+            if st.button("Start New Visit", use_container_width=True):
+                st.session_state.claim_success = False
+                st.session_state.pickup_ticket = None
+                st.session_state.session_active = False
+                st.session_state.messages = []
+                st.rerun()
+        else:
+            st.button("✅ Claim Ration & Get QR Code", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
+
+# 9. Render Screen based on Portal Mode
+if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
+    st.header("🛠️ Cultivating Community — Admin Dashboard")
+    st.markdown("Welcome, team! Here you can monitor live orders placed and view real-time stock levels across all departments.")
+    
+    tab1, tab2 = st.tabs(["📦 Live Inventory & Stock", "📋 Placed Orders & QR Verification"])
+    
+    with tab1:
+        st.subheader("Current Stock Levels")
+        if not inventory_items:
+            st.info("No inventory items found.")
+        else:
+            for item in inventory_items:
+                cols = st.columns([3, 2, 2])
+                cols[0].markdown(f"**{item['item_name']}**")
+                cols[1].caption(f"Category: {item['category']}")
+                cols[2].markdown(f"Stock Left: **{item['quantity']} {item['unit']}**")
+                st.divider()
+                
+    with tab2:
+        st.subheader("Recent Anonymous Basket Orders")
+        baskets = get_all_baskets()
+        if not baskets:
+            st.info("No orders placed yet.")
+        else:
+            for b in baskets:
+                with st.container(border=True):
+                    cols = st.columns(2)
+                    cols[0].markdown(f"**Order ID:** `{b.get('id')}`")
+                    cols[1].markdown(f"🕒 **Pickup Time:** {b.get('pickup_time')}")
+                    st.caption(f"📍 **Location:** {b.get('pickup_location')}")
+                    st.markdown("**Items Claimed:**")
+                    items_dict = b.get('items', {})
+                    for item_name, details in items_dict.items():
+                        st.text(f"  • {item_name} (Qty: {details.get('quantity', 1)})")
+else:
+    # Public Shopper View
+    col_grid, col_chat = st.columns([1.2, 1])
+
+    with col_grid:
+        st.markdown("### 📦 Available Pantry Inventory")
+        if not inventory_items:
+            st.warning("No inventory loaded in Supabase yet.")
+        else:
+            cols = st.columns(3)
+            for index, item in enumerate(inventory_items):
+                with cols[index % 3]:
+                    with st.container(border=True):
+                        st.markdown(f"**{item['item_name']}**")
+                        st.caption(f"Category: {item['category']}")
+                        st.markdown(f"Stock: **{item['quantity']} {item['unit']}**")
                         
-                    st.session_state.messages.append({"role": "assistant", "content": response_text})
-                    st.session_state.speak_greeting = response_text
+                        if st.button("Add 1", key=f"grid_add_{item['id']}", use_container_width=True):
+                            if not st.session_state.session_active:
+                                start_session()
+                            cat = item['category']
+                            iname = item['item_name']
+                            current_q = st.session_state.basket.get(iname, {}).get("quantity", 0)
+                            cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
+                            
+                            if cat_count < 3 and current_q < 3:
+                                st.session_state.basket[iname] = {"category": cat, "quantity": current_q + 1}
+                                st.success(f"Added {iname}!")
+                                st.rerun()
+                            else:
+                                st.error("Limit reached (Max 3 per department)!")
+
+    with col_chat:
+        st.markdown("### 💬 Monique (Virtual Floor Manager)")
+        
+        if not st.session_state.session_active:
+            st.info("Tap the button below to start your conversation with Monique.")
+            st.button("👋 Press to Begin Session", on_click=start_session, use_container_width=True, type="primary")
+        else:
+            if st.session_state.speak_greeting:
+                speak_text(st.session_state.speak_greeting)
+                st.session_state.speak_greeting = False
+
+            chat_container = st.container(height=400)
+            with chat_container:
+                for msg in st.session_state.messages:
+                    if msg["role"] != "system":
+                        with st.chat_message(msg["role"]):
+                            st.markdown(msg["content"])
+
+            user_input_text = ""
+            audio_value = st.audio_input("🎤 Tap to talk", key=f"mic_{st.session_state.audio_key}")
+            chat_text = st.chat_input("✨ Or type your request...")
+
+            if audio_value:
+                with st.spinner("Listening..."):
+                    try:
+                        transcription = client.audio.transcriptions.create(
+                            file=("audio.wav", audio_value.read()),
+                            model="whisper-large-v3-turbo",
+                            response_format="text"
+                        )
+                        user_input_text = transcription.strip() if isinstance(transcription, str) else getattr(transcription, "text", "").strip()
+                    except Exception as e:
+                        st.error(f"Transcription error: {e}")
+            elif chat_text:
+                user_input_text = chat_text
+
+            if user_input_text:
+                if len(st.session_state.messages) > 11:
+                    st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
+
+                st.session_state.messages.append({"role": "user", "content": user_input_text})
+                
+                added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
+                
+                report_lines = []
+                if added_items:
+                    added_desc = [f"{i['qty']}x {i['name']} ({i['category']})" for i in added_items]
+                    report_lines.append(f"- Successfully added to basket: {', '.join(added_desc)}")
+                if rejected_items:
+                    rej_desc = [r['name'] for r in rejected_items]
+                    report_lines.append(f"- Blocked/Rejected (Department limit of 3 reached): {', '.join(rej_desc)}")
+                if not added_items and not rejected_items:
+                    report_lines.append("- No items were added or modified (this was a general inquiry or advisory request).")
                     
-                except Exception as e:
-                    st.error(f"Connection issue: {e}")
+                transaction_report = "\n".join(report_lines)
+                    
+                with st.spinner("Monique is responding..."):
+                    system_prompt = build_system_prompt(transaction_report)
+                    if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
+                        st.session_state.messages[0]["content"] = system_prompt
+                    else:
+                        st.session_state.messages.insert(0, {"role": "system", "content": system_prompt})
+                    
+                    try:
+                        completion = client.chat.completions.create(
+                            model="openai/gpt-oss-120b",
+                            messages=st.session_state.messages,
+                            temperature=0.3,
+                            max_tokens=250
+                        )
+                        response_text = completion.choices[0].message.content
                         
-            st.session_state.audio_key += 1
-            st.rerun()
+                        if not response_text or not response_text.strip():
+                            response_text = "I'm here to help you find whatever you need. Let me know which department you'd like to explore next!"
+                            
+                        st.session_state.messages.append({"role": "assistant", "content": response_text})
+                        st.session_state.speak_greeting = response_text
+                        
+                    except Exception as e:
+                        st.error(f"Connection issue: {e}")
+                            
+                st.session_state.audio_key += 1
+                st.rerun()
