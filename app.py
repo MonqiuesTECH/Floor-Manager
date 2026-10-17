@@ -8,13 +8,13 @@ from datetime import datetime, timedelta
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="centered")
 
-# 2. Secure Secret Configuration (No UI Inputs)
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
-SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL"))
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY"))
+# 2. Secure Secret & Database Configuration
+SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 
-if not GROQ_API_KEY or not SUPABASE_URL or not SUPABASE_KEY:
-    st.error("🚨 Required API keys or Supabase credentials are missing from your Streamlit secrets configuration.")
+if not GROQ_API_KEY or not SUPABASE_KEY:
+    st.error("🚨 Please ensure SUPABASE_KEY and GROQ_API_KEY are configured in your Streamlit secrets (.streamlit/secrets.toml).")
     st.stop()
 
 client = OpenAI(
@@ -36,7 +36,7 @@ def get_pantry_inventory():
 def save_basket_to_supabase(basket_data, pickup_ticket):
     """
     Saves the basket using lightweight JSONB storage. 
-    Extremely storage-efficient for Supabase Free Tier (100 baskets take < 100 KB).
+    Extremely storage-efficient for Supabase Free Tier.
     """
     try:
         supabase.table("baskets").insert({
