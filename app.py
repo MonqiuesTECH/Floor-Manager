@@ -31,7 +31,6 @@ def get_pantry_inventory():
 
 def get_all_baskets():
     try:
-        # Try fetching with created_at ordering if available
         response = supabase.table("baskets").select("*").order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
@@ -49,7 +48,6 @@ def update_inventory_stock(item_id, new_quantity):
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
     try:
-        # 1. Save the basket order
         response = supabase.table("baskets").insert({
             "items": basket_data,
             "pickup_time": pickup_ticket["time"],
@@ -58,7 +56,6 @@ def save_basket_to_supabase(basket_data, pickup_ticket):
         
         ticket_id = response.data[0].get('id') if response.data else None
 
-        # 2. Automatically decrement inventory levels based on claimed items
         inventory_items = get_pantry_inventory()
         for item_name, details in basket_data.items():
             claimed_qty = details.get('quantity', 0)
@@ -242,7 +239,7 @@ st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar Navigation: Public Shopper controls vs Admin Portal Login
+# Sidebar Navigation
 with st.sidebar:
     st.markdown("### 🔐 Portal Navigation")
     portal_mode = st.radio("Select View:", ["🛍️ Shopper Kiosk", "🛠️ Admin Portal (Volunteers)"])
@@ -314,20 +311,29 @@ with st.sidebar:
 # 9. Render Screen based on Portal Mode
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Here you can monitor live orders, check remaining stock, and update daily inventory levels.")
+    st.markdown("Welcome, team! Here you can monitor live orders, check remaining stock by department, and update daily inventory levels.")
     
     tab1, tab2, tab3 = st.tabs(["📦 Live Inventory & Stock", "📋 Placed Orders & QR Verification", "⚙️ Update Daily Stock"])
     
     with tab1:
-        st.subheader("Current Stock Levels")
+        st.subheader("Current Stock Levels by Department")
         if not inventory_items:
             st.info("No inventory items found.")
         else:
+            # Group inventory by category for clear admin organization
+            grouped_inv = {}
             for item in inventory_items:
-                cols = st.columns([3, 2, 2])
-                cols[0].markdown(f"**{item['item_name']}**")
-                cols[1].caption(f"Category: {item['category']}")
-                cols[2].markdown(f"Stock Left: **{item['quantity']} {item['unit']}**")
+                cat = item['category']
+                if cat not in grouped_inv:
+                    grouped_inv[cat] = []
+                grouped_inv[cat].append(item)
+                
+            for cat, items in grouped_inv.items():
+                st.markdown(f"### 📂 {cat}")
+                for item in items:
+                    cols = st.columns([3, 2])
+                    cols[0].markdown(f"• **{item['item_name']}**")
+                    cols[1].markdown(f"Stock Left: **{item['quantity']} {item['unit']}**")
                 st.divider()
                 
     with tab2:
