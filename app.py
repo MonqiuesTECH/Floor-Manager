@@ -49,7 +49,7 @@ def get_all_baskets():
 def update_inventory_stock(item_id, new_quantity):
     try:
         supabase.table("inventory").update({"quantity": new_quantity}).eq("id", item_id).execute()
-        st.cache_data.clear() # Clear cache on write
+        st.cache_data.clear()
     except Exception as e:
         print(f"Error updating stock: {e}")
 
@@ -352,7 +352,7 @@ with st.sidebar:
 # 9. Render Screen based on Portal Mode
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and track fundraising revenue splits.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and track all incoming grants, donations, and revenue splits.")
     
     tab1, tab2, tab3, tab4 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Revenue"])
     
@@ -417,8 +417,8 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     st.rerun()
 
     with tab4:
-        st.subheader("🤝 Surplus Food Rescue & Fundraising Revenue Split")
-        st.markdown("Log incoming bakery drop-offs and track event fundraising splits (80% to Cultivating Community nonprofit initiatives & Wards 7/8 walk-in store fund / 20% operations).")
+        st.subheader("🤝 Surplus Food Rescue & Universal Revenue Tracking")
+        st.markdown("Log incoming bakery drop-offs and track all incoming grants, donations, and revenue splits (80% to Cultivating Community nonprofit initiatives & Wards 7/8 walk-in store fund / 20% operations).")
         
         with st.form("rescue_form"):
             st.markdown("#### Log Surplus Food Rescue")
@@ -430,11 +430,11 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                 st.success(f"Successfully logged rescue drop from {rescue_source}!")
 
         st.markdown("---")
-        st.markdown("#### 📊 Fundraising & Revenue Split Tracker")
+        st.markdown("#### 📊 Universal Grant, Donation & Revenue Split Tracker")
         col_rev1, col_rev2 = st.columns(2)
         col_rev1.metric(label="Total 80% Nonprofit Allocation (Wards 7/8 Store Fund)", value="$24,000 / mo")
-        col_rev2.metric(label="Total 20% Event Operations Split", value="$6,000 / mo")
-        st.caption("Active model aligned with Friday Night Fight Night capital allocations and community donations.")
+        col_rev2.metric(label="Total 20% Operations Split", value="$6,000 / mo")
+        st.caption("Tracking all grants, community donations, and funding sources universally.")
 else:
     # Public Shopper View: Catalog Grid on Left, Monique Chat on Right
     col_grid, col_chat = st.columns([1.2, 1])
