@@ -21,7 +21,7 @@ client = OpenAI(
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory, Basket, & Admin Log Retrieval
+# 3. Supabase Inventory & Basket Management
 def get_pantry_inventory():
     try:
         response = supabase.table("inventory").select("*").execute()
@@ -31,27 +31,46 @@ def get_pantry_inventory():
 
 def get_all_baskets():
     try:
+        # Try fetching with created_at ordering if available
         response = supabase.table("baskets").select("*").order("created_at", desc=True).execute()
         return response.data
     except Exception as e:
-        # Fallback if created_at column doesn't exist
         try:
             response = supabase.table("baskets").select("*").execute()
             return response.data
         except:
             return []
 
+def update_inventory_stock(item_id, new_quantity):
+    try:
+        supabase.table("inventory").update({"quantity": new_quantity}).eq("id", item_id).execute()
+    except Exception as e:
+        print(f"Error updating stock: {e}")
+
 def save_basket_to_supabase(basket_data, pickup_ticket):
     try:
+        # 1. Save the basket order
         response = supabase.table("baskets").insert({
             "items": basket_data,
             "pickup_time": pickup_ticket["time"],
             "pickup_location": pickup_ticket["location"]
         }).execute()
-        if response.data:
-            return response.data[0].get('id')
+        
+        ticket_id = response.data[0].get('id') if response.data else None
+
+        # 2. Automatically decrement inventory levels based on claimed items
+        inventory_items = get_pantry_inventory()
+        for item_name, details in basket_data.items():
+            claimed_qty = details.get('quantity', 0)
+            for inv in inventory_items:
+                if inv['item_name'].lower() == item_name.lower():
+                    current_stock = inv['quantity']
+                    new_stock = max(0, current_stock - claimed_qty)
+                    update_inventory_stock(inv['id'], new_stock)
+
+        return ticket_id
     except Exception as e:
-        print(f"Error saving basket to Supabase: {e}")
+        print(f"Error saving basket or decrementing stock: {e}")
     return None
 
 # 4. Zero-Cost Browser Text-to-Speech JS Injection
@@ -235,7 +254,6 @@ with st.sidebar:
             admin_user = st.text_input("Username")
             admin_pass = st.text_input("Password", type="password")
             if st.button("Sign In", use_container_width=True):
-                # Simple secure credentials check for Andrew & staff
                 if admin_user == "andrew" and admin_pass == "dandelion2026":
                     st.session_state.admin_logged_in = True
                     st.success("Successfully logged in!")
@@ -248,7 +266,6 @@ with st.sidebar:
                 st.session_state.admin_logged_in = False
                 st.rerun()
 
-    # If in Shopper mode, show the normal shopper sidebar
     if portal_mode == "🛍️ Shopper Kiosk" or not st.session_state.admin_logged_in:
         st.markdown("### 🛒 Your Custom Basket")
         if st.session_state.basket:
@@ -297,9 +314,9 @@ with st.sidebar:
 # 9. Render Screen based on Portal Mode
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Here you can monitor live orders placed and view real-time stock levels across all departments.")
+    st.markdown("Welcome, team! Here you can monitor live orders, check remaining stock, and update daily inventory levels.")
     
-    tab1, tab2 = st.tabs(["📦 Live Inventory & Stock", "📋 Placed Orders & QR Verification"])
+    tab1, tab2, tab3 = st.tabs(["📦 Live Inventory & Stock", "📋 Placed Orders & QR Verification", "⚙️ Update Daily Stock"])
     
     with tab1:
         st.subheader("Current Stock Levels")
@@ -329,6 +346,31 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     items_dict = b.get('items', {})
                     for item_name, details in items_dict.items():
                         st.text(f"  • {item_name} (Qty: {details.get('quantity', 1)})")
+
+    with tab3:
+        st.subheader("Daily Stock Reset & Updates")
+        st.markdown("Use this panel to update available quantities for today. Changes take effect immediately on the shopper kiosk.")
+        
+        if not inventory_items:
+            st.info("No inventory items found to update.")
+        else:
+            with st.form("inventory_update_form"):
+                updated_quantities = {}
+                for item in inventory_items:
+                    new_val = st.number_input(
+                        label=f"{item['item_name']} ({item['category']}) - Current: {item['quantity']} {item['unit']}",
+                        min_value=0,
+                        value=int(item['quantity']),
+                        key=f"update_stock_{item['id']}"
+                    )
+                    updated_quantities[item['id']] = new_val
+                
+                submit_updates = st.form_submit_button("💾 Save Daily Stock Updates", type="primary")
+                if submit_updates:
+                    for item_id, qval in updated_quantities.items():
+                        update_inventory_stock(item_id, qval)
+                    st.success("✅ Daily inventory successfully updated!")
+                    st.rerun()
 else:
     # Public Shopper View
     col_grid, col_chat = st.columns([1.2, 1])
