@@ -176,10 +176,6 @@ if "rescue_logs" not in st.session_state:
     st.session_state.rescue_logs = [
         {"donor": "Call Your Mother Bakery", "items": "25 Bagel Sleeves & Artisan Breads", "volunteer": "Andrew", "date": "2026-10-16"}
     ]
-if "ai_strategy_messages" not in st.session_state:
-    st.session_state.ai_strategy_messages = [
-        {"role": "system", "content": "You are an expert nonprofit financial strategist and grant advisor specializing in community food security and capital campaign scaling for Washington D.C. Wards 7 and 8."}
-    ]
 
 # ==========================================
 # 6. CALLBACKS & NLP PARSING
@@ -384,9 +380,9 @@ with st.sidebar:
 # ==========================================
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, track universal financials, and consult the AI Grant & Funding Strategist.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, track universal financials, and review real-time AI strategic recommendations.")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Ledger", "🧠 AI Funding Strategist"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Ledger", "🧠 Autonomous AI Grant & Funding Strategist"])
     
     with tab1:
         st.subheader("Current Stock Levels by Department")
@@ -505,39 +501,48 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
             st.text(f"{color_emoji} [{tx['date']}] {tx['type']} ({tx['category']}) - {tx['source']}: {sign}${tx['amount']:,.2f}")
 
     with tab5:
-        st.subheader("🧠 AI Grant & Funding Strategist")
-        st.markdown("Consult our AI strategist for grant opportunities, capital allocation ideas, and community partnership strategies to fund the Wards 7 or 8 walk-in dignity grocery store.")
-        
-        chat_strat_container = st.container(height=350)
-        with chat_strat_container:
-            for msg in st.session_state.ai_strategy_messages:
-                if msg["role"] != "system":
-                    with st.chat_message(msg["role"]):
-                        st.markdown(msg["content"])
-                        
-        strat_input = st.chat_input("Ask the AI strategist (e.g., 'What grants should we apply for in DC to fund our Wards 7/8 store?')...")
-        if strat_input:
-            st.session_state.ai_strategy_messages.append({"role": "user", "content": strat_input})
-            
-            context_payload = (
-                f"Current Financial Inflows Total: ${total_inflow:,.2f}. Outflows:${total_outflow:,.2f}.\n"
-                f"Current Inventory Items: {inventory_items}\n"
-                f"User Question: {strat_input}"
-            )
-            
-            with st.spinner("AI Strategist is analyzing financial and world context..."):
+        st.subheader("🧠 Autonomous AI Grant & Funding Strategist")
+        st.markdown("Your AI strategist continuously monitors live inventory levels, recent basket activity, and financial ledgers to provide daily recommendations on how to scale the nonprofit and fund the Wards 7 or 8 walk-in dignity grocery store.")
+
+        if "cached_ai_recommendation" not in st.session_state:
+            with st.spinner("AI Strategist is analyzing live dashboard metrics and D.C. community food security data..."):
                 try:
+                    total_inflow_calc = sum(item['amount'] for item in st.session_state.financial_ledger if item['type'] == 'Inflow')
+                    total_outflow_calc = sum(item['amount'] for item in st.session_state.financial_ledger if item['type'] == 'Outflow')
+                    
+                    prompt_payload = (
+                        f"Analyze our current dashboard metrics for Cultivating Community in Washington D.C.:\n"
+                        f"- Total Inflows: ${total_inflow_calc:,.2f}\n"
+                        f"- Total Outflows: ${total_outflow_calc:,.2f}\n"
+                        f"- Live Inventory: {inventory_items}\n"
+                        f"Provide a daily strategic action plan to advance our nonprofit toward our goal of funding a Swiss-style walk-in dignity grocery store in Wards 7 or 8. "
+                        f"Format your response clearly into three sections:\n"
+                        f"1. **WHAT & WHY**: Specific action item and reasoning based on current data.\n"
+                        f"2. **HOW**: Step-by-step execution guide.\n"
+                        f"3. **WHO TO DELEGATE TO**: Recommended team member or partner role."
+                    )
+                    
                     res = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
-                        messages=st.session_state.ai_strategy_messages + [{"role": "user", "content": context_payload}],
-                        temperature=0.5,
-                        max_tokens=350
+                        messages=[
+                            {"role": "system", "content": "You are an expert nonprofit financial strategist specializing in Washington D.C. community development, food security grants, and capital campaigns."},
+                            {"role": "user", "content": prompt_payload}
+                        ],
+                        temperature=0.4,
+                        max_tokens=400
                     )
-                    ai_reply = res.choices[0].message.content
-                    st.session_state.ai_strategy_messages.append({"role": "assistant", "content": ai_reply})
-                    st.rerun()
+                    st.session_state.cached_ai_recommendation = res.choices[0].message.content
                 except Exception as e:
-                    st.error(f"Strategy error: {e}")
+                    st.session_state.cached_ai_recommendation = f"Unable to fetch real-time AI recommendation at the moment: {e}"
+
+        with st.container(border=True):
+            st.markdown("### 🎯 Today's Strategic Directive")
+            st.markdown(st.session_state.cached_ai_recommendation)
+            
+        if st.button("🔄 Refresh Strategic Analysis", use_container_width=True):
+            if "cached_ai_recommendation" in st.session_state:
+                del st.session_state.cached_ai_recommendation
+            st.rerun()
 
 # ==========================================
 # 9. PUBLIC SHOPPER KIOSK VIEW
@@ -652,7 +657,7 @@ else:
                     report_lines.append("- No items were added or modified (this was a general inquiry or advisory request).")
                     
                 transaction_report = "\n".join(report_lines)
-                    
+                
                 with st.spinner("Monique is responding..."):
                     system_prompt = build_system_prompt(transaction_report)
                     if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
