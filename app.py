@@ -6,10 +6,15 @@ from openai import OpenAI
 from supabase import create_client, Client
 from datetime import datetime, timedelta
 
-# 1. Page Configuration
-st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="wide")
+# ==========================================
+# 1. PAGE CONFIGURATION & CREDENTIALS
+# ==========================================
+st.set_page_config(
+    page_title="Cultivating Community — Floor Manager Kiosk", 
+    page_icon="🍲", 
+    layout="wide"
+)
 
-# 2. Direct Credentials Configuration
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
 SUPABASE_KEY = "sb_publishable_vlLsuD4DIgnL2fqpbr6QLQ_VsYWsAqm"
 GROQ_API_KEY = "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"
@@ -25,8 +30,10 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# 3. Cached Supabase Inventory & Basket Management
-@st.cache_data(ttl=30)
+# ==========================================
+# 2. CACHED DATABASE OPERATIONS
+# ==========================================
+@st.cache_data(ttl=20)
 def get_pantry_inventory():
     try:
         response = supabase.table("inventory").select("*").execute()
@@ -34,7 +41,7 @@ def get_pantry_inventory():
     except Exception as e:
         return []
 
-@st.cache_data(ttl=15)
+@st.cache_data(ttl=10)
 def get_all_baskets():
     try:
         response = supabase.table("baskets").select("*").order("created_at", desc=True).execute()
@@ -78,7 +85,9 @@ def save_basket_to_supabase(basket_data, pickup_ticket):
         print(f"Error saving basket or decrementing stock: {e}")
     return None
 
-# 4. Zero-Cost Browser Text-to-Speech JS Injection
+# ==========================================
+# 3. TEXT-TO-SPEECH AUDIO INJECTION
+# ==========================================
 def speak_text(text):
     clean_text = re.sub(r'[*_#]', '', text)
     clean_text = clean_text.replace('\\', '\\\\').replace('"', '\\"').replace('\n', ' ')
@@ -94,7 +103,9 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt
+# ==========================================
+# 4. MONIQUE AI SYSTEM PROMPT BUILDER
+# ==========================================
 def build_system_prompt(transaction_report=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -135,7 +146,9 @@ def build_system_prompt(transaction_report=""):
     )
     return prompt
 
-# 6. Smooth State Management Initialization
+# ==========================================
+# 5. STATE MANAGEMENT INITIALIZATION
+# ==========================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "audio_key" not in st.session_state:
@@ -152,8 +165,25 @@ if "pickup_ticket" not in st.session_state:
     st.session_state.pickup_ticket = None
 if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
+if "financial_ledger" not in st.session_state:
+    st.session_state.financial_ledger = [
+        {"type": "Inflow", "category": "Grant", "source": "D.C. Community Health Grant", "amount": 25000.0, "date": "2026-10-01"},
+        {"type": "Inflow", "category": "Donation", "source": "Anonymous Patron", "amount": 5000.0, "date": "2026-10-05"},
+        {"type": "Outflow", "category": "Operations", "source": "Hub Rental & Utilities", "amount": 4000.0, "date": "2026-10-10"},
+        {"type": "Outflow", "category": "Logistics", "source": "Delivery Fleet Fuel & Insurance", "amount": 2000.0, "date": "2026-10-12"}
+    ]
+if "rescue_logs" not in st.session_state:
+    st.session_state.rescue_logs = [
+        {"donor": "Call Your Mother Bakery", "items": "25 Bagel Sleeves & Artisan Breads", "volunteer": "Andrew", "date": "2026-10-16"}
+    ]
+if "ai_strategy_messages" not in st.session_state:
+    st.session_state.ai_strategy_messages = [
+        {"role": "system", "content": "You are an expert nonprofit financial strategist and grant advisor specializing in community food security and capital campaign scaling for Washington D.C. Wards 7 and 8."}
+    ]
 
-# 7. Button Callback Logic
+# ==========================================
+# 6. CALLBACKS & NLP PARSING
+# ==========================================
 def start_session():
     st.session_state.session_active = True
     greeting = "Welcome to Cultivating Community. You are welcome to select up to 3 items from each of our food departments today—how may I assist you with your basket?"
@@ -191,7 +221,6 @@ def process_claim(is_delivery=False, dc_zip=""):
         
     st.session_state.speak_greeting = closing_speech
 
-# NLP Parsing & Adding Logic
 def extract_quantity(text_lower, item_keywords):
     num_map = {"one": 1, "two": 2, "three": 3, "1": 1, "2": 2, "3": 3}
     words = text_lower.split()
@@ -253,13 +282,14 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 
     return added, rejected
 
-# 8. Main UI Layout
+# ==========================================
+# 7. MAIN UI LAYOUT & SIDEBAR
+# ==========================================
 st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar Navigation & Accessibility
 with st.sidebar:
     st.markdown("### 🌐 Accessibility & Language")
     selected_lang = st.selectbox("Select Language:", ["English", "Español (Spanish)", "አማርኛ (Amharic)", "Français (French)", "Tiếng Việt (Vietnamese)"])
@@ -349,12 +379,14 @@ with st.sidebar:
                     process_claim(is_delivery=False)
                     st.rerun()
 
-# 9. Render Screen based on Portal Mode
+# ==========================================
+# 8. ADMIN PORTAL VIEW
+# ==========================================
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and track all incoming grants, donations, and revenue splits.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, track universal financials, and consult the AI Grant & Funding Strategist.")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Revenue"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Ledger", "🧠 AI Funding Strategist"])
     
     with tab1:
         st.subheader("Current Stock Levels by Department")
@@ -417,26 +449,100 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     st.rerun()
 
     with tab4:
-        st.subheader("🤝 Surplus Food Rescue & Universal Revenue Tracking")
-        st.markdown("Log incoming bakery drop-offs and track all incoming grants, donations, and revenue splits (80% to Cultivating Community nonprofit initiatives & Wards 7/8 walk-in store fund / 20% operations).")
-        
-        with st.form("rescue_form"):
-            st.markdown("#### Log Surplus Food Rescue")
-            rescue_source = st.text_input("Food Donor / Bakery Source (e.g., Call Your Mother Rescue)")
-            rescue_details = st.text_area("Surplus Items & Quantities Dropped Off")
-            volunteer_name = st.text_input("Coordinator / Volunteer On Duty")
-            submit_rescue = st.form_submit_button("Log Food Rescue Drop")
-            if submit_rescue:
-                st.success(f"Successfully logged rescue drop from {rescue_source}!")
+        st.subheader("🤝 Surplus Food Rescue Log")
+        with st.form("rescue_form_easy"):
+            col_r1, col_r2 = st.columns(2)
+            donor_source = col_r1.selectbox("Donor / Bakery Source", ["Call Your Mother Bakery", "Trader Joe's Surplus", "Local Farm Drop", "Other Community Partner"])
+            volunteer_duty = col_r2.text_input("Volunteer / Coordinator on Duty", value="Andrew")
+            
+            rescue_summary = st.text_input("Items & Quantities (e.g., 30 Bagel Sleeves, 15 Produce Boxes)")
+            submit_quick_rescue = st.form_submit_button("📥 Log Food Rescue Drop", type="primary")
+            if submit_quick_rescue and rescue_summary:
+                st.session_state.rescue_logs.insert(0, {"donor": donor_source, "items": rescue_summary, "volunteer": volunteer_duty, "date": datetime.now().strftime("%Y-%m-%d")})
+                st.success(f"Successfully logged rescue drop from {donor_source}!")
+
+        if st.session_state.rescue_logs:
+            st.markdown("**Recent Food Rescues:**")
+            for log in st.session_state.rescue_logs:
+                st.text(f"• [{log['date']}] {log['donor']}: {log['items']} (Logged by {log['volunteer']})")
 
         st.markdown("---")
-        st.markdown("#### 📊 Universal Grant, Donation & Revenue Split Tracker")
-        col_rev1, col_rev2 = st.columns(2)
-        col_rev1.metric(label="Total 80% Nonprofit Allocation (Wards 7/8 Store Fund)", value="$24,000 / mo")
-        col_rev2.metric(label="Total 20% Operations Split", value="$6,000 / mo")
-        st.caption("Tracking all grants, community donations, and funding sources universally.")
+        st.subheader("📊 Universal Financial Ledger (Inflows & Outflows)")
+        total_inflow = sum(item['amount'] for item in st.session_state.financial_ledger if item['type'] == 'Inflow')
+        total_outflow = sum(item['amount'] for item in st.session_state.financial_ledger if item['type'] == 'Outflow')
+        net_balance = total_inflow - total_outflow
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Total Inflows (Grants/Donations)", f"${total_inflow:,.2f}")
+        col_m2.metric("Total Outflows (Expenses)", f"${total_outflow:,.2f}")
+        col_m3.metric("Net Operating Balance", f"${net_balance:,.2f}")
+
+        st.markdown("---")
+        st.markdown("#### Add New Transaction")
+        with st.form("ledger_form"):
+            col_l1, col_l2, col_l3, col_l4 = st.columns(4)
+            tx_type = col_l1.selectbox("Type", ["Inflow", "Outflow"])
+            tx_cat = col_l2.selectbox("Category", ["Grant", "Donation", "Delivery Fee", "Operations", "Logistics", "Store Fund Setup", "Other"])
+            tx_source = col_l3.text_input("Source / Description")
+            tx_amount = col_l4.number_input("Amount ($)", min_value=0.0, step=50.0)
+            
+            submit_tx = st.form_submit_button("➕ Record Transaction", type="primary")
+            if submit_tx and tx_source:
+                st.session_state.financial_ledger.insert(0, {
+                    "type": tx_type,
+                    "category": tx_cat,
+                    "source": tx_source,
+                    "amount": tx_amount,
+                    "date": datetime.now().strftime("%Y-%m-%d")
+                })
+                st.success("Transaction recorded successfully!")
+                st.rerun()
+
+        st.markdown("#### Transaction History")
+        for tx in st.session_state.financial_ledger:
+            color_emoji = "🟢" if tx['type'] == 'Inflow' else "🔴"
+            sign = "+" if tx['type'] == 'Inflow' else "-"
+            st.text(f"{color_emoji} [{tx['date']}] {tx['type']} ({tx['category']}) - {tx['source']}: {sign}${tx['amount']:,.2f}")
+
+    with tab5:
+        st.subheader("🧠 AI Grant & Funding Strategist")
+        st.markdown("Consult our AI strategist for grant opportunities, capital allocation ideas, and community partnership strategies to fund the Wards 7 or 8 walk-in dignity grocery store.")
+        
+        chat_strat_container = st.container(height=350)
+        with chat_strat_container:
+            for msg in st.session_state.ai_strategy_messages:
+                if msg["role"] != "system":
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                        
+        strat_input = st.chat_input("Ask the AI strategist (e.g., 'What grants should we apply for in DC to fund our Wards 7/8 store?')...")
+        if strat_input:
+            st.session_state.ai_strategy_messages.append({"role": "user", "content": strat_input})
+            
+            context_payload = (
+                f"Current Financial Inflows Total: ${total_inflow:,.2f}. Outflows:${total_outflow:,.2f}.\n"
+                f"Current Inventory Items: {inventory_items}\n"
+                f"User Question: {strat_input}"
+            )
+            
+            with st.spinner("AI Strategist is analyzing financial and world context..."):
+                try:
+                    res = client.chat.completions.create(
+                        model="openai/gpt-oss-120b",
+                        messages=st.session_state.ai_strategy_messages + [{"role": "user", "content": context_payload}],
+                        temperature=0.5,
+                        max_tokens=350
+                    )
+                    ai_reply = res.choices[0].message.content
+                    st.session_state.ai_strategy_messages.append({"role": "assistant", "content": ai_reply})
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Strategy error: {e}")
+
+# ==========================================
+# 9. PUBLIC SHOPPER KIOSK VIEW
+# ==========================================
 else:
-    # Public Shopper View: Catalog Grid on Left, Monique Chat on Right
     col_grid, col_chat = st.columns([1.2, 1])
 
     with col_grid:
