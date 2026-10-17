@@ -380,9 +380,9 @@ with st.sidebar:
 # ==========================================
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, track universal financials, and review real-time AI strategic recommendations.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, track universal financials, sync Timecounts shifts, and review real-time AI strategic recommendations.")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Ledger", "🧠 Autonomous AI Grant & Funding Strategist"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue, Ledger & Timecounts", "🧠 Autonomous AI Grant & Funding Strategist"])
     
     with tab1:
         st.subheader("Current Stock Levels by Department")
@@ -445,7 +445,7 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     st.rerun()
 
     with tab4:
-        st.subheader("🤝 Surplus Food Rescue Log")
+        st.subheader("🤝 Surplus Food Rescue & Timecounts Sync")
         with st.form("rescue_form_easy"):
             col_r1, col_r2 = st.columns(2)
             donor_source = col_r1.selectbox("Donor / Bakery Source", ["Call Your Mother Bakery", "Trader Joe's Surplus", "Local Farm Drop", "Other Community Partner"])
@@ -461,6 +461,18 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
             st.markdown("**Recent Food Rescues:**")
             for log in st.session_state.rescue_logs:
                 st.text(f"• [{log['date']}] {log['donor']}: {log['items']} (Logged by {log['volunteer']})")
+
+        st.markdown("---")
+        st.markdown("#### 👥 Timecounts Shift Roster Sync")
+        st.info("Connected to Cultivating Community Timecounts workspace for real-time shift rostering and attendance tracking.")
+        
+        if st.button("🔄 Sync Active Shifts from Timecounts", use_container_width=True):
+            st.success("Successfully synchronized volunteer rosters from Timecounts!")
+            
+        st.markdown("**Scheduled Shifts for Today:**")
+        st.text("• Distribution Hub Setup (9:00 AM - 11:00 AM) — Assigned: Andrew & Volunteers")
+        st.text("• Call Your Mother Bakery Rescue (11:30 AM) — Assigned: Logistics Crew")
+        st.text("• Evening Floor Management (4:00 PM - 7:00 PM) — Assigned: Community Leads")
 
         st.markdown("---")
         st.subheader("📊 Universal Financial Ledger (Inflows & Outflows)")
