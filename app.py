@@ -58,7 +58,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Strict Non-Auto-Add Suggestion Logic
+# 5. Dynamic System Prompt
 def build_system_prompt(transaction_report=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -91,7 +91,7 @@ def build_system_prompt(transaction_report=""):
         f"{allowance_text}"
         f"{transaction_section}"
         "CONVERSATIONAL RULES:\n"
-        "1. NEVER AUTO-ADD OR MODIFY BASKET ON GENERAL QUESTIONS: If the visitor asks 'What else can I add?', 'What's available?', or 'What do you have?', DO NOT modify or add items to their basket. Your only job on these queries is to review their current basket, check the remaining department allowances, and verbally suggest available items from departments where they still have space.\n"
+        "1. NEVER AUTO-ADD OR MODIFY BASKET ON GENERAL QUESTIONS: If the visitor asks 'What else can I add?', 'What's available?', or 'What do you have?', DO NOT modify or add items to their basket. Review their current basket, check remaining department allowances, and verbally suggest available items from departments where they still have space.\n"
         "2. ACKNOWLEDGE EXPLICIT ADDITIONS: If the visitor explicitly asks to add an item, confirm it. If a department is full (0 remaining), gently let them know.\n"
         "3. OUT OF STOCK: If they request an item not in our inventory database, politely inform them and offer an in-stock alternative.\n"
         "4. EVERYTHING IS FREE & PRIVATE: Never mention money, prices, names, IDs, or addresses.\n"
@@ -137,6 +137,10 @@ def process_claim():
     st.session_state.pickup_ticket = ticket
     st.session_state.claim_success = True
     st.session_state.basket = {}
+    
+    # Vocalize closing script instantly upon claiming
+    closing_speech = f"Please scan the QR code for your anonymous ticket, and your pickup time is {ticket['time']} at Cultivating Community. Thank you for shopping with us. Hope to see you soon."
+    st.session_state.speak_greeting = closing_speech
 
 # NLP Parsing & Adding Logic
 def extract_quantity(text_lower, item_keywords):
@@ -155,7 +159,6 @@ def extract_quantity(text_lower, item_keywords):
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
     
-    # If the user is asking a general inquiry question, DO NOT trigger item parsing or auto-adding
     general_inquiry_phrases = ["what else", "what can i add", "what do you have", "what's available", "what is available", "show me"]
     if any(phrase in text_lower for phrase in general_inquiry_phrases):
         return [], []
