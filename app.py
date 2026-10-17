@@ -59,7 +59,7 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Real-Time Alerts & Out-of-Stock Logic
+# 5. Dynamic System Prompt with Out-of-Stock Handlers
 def build_system_prompt(dynamic_alert=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
@@ -69,7 +69,7 @@ def build_system_prompt(dynamic_alert=""):
         cat = details['category']
         category_counts[cat] = category_counts.get(cat, 0) + details['quantity']
         
-    available_categories = {item['category'] for item in inventory_data}
+    available_categories = {item['category'] for item in inventory_data} if inventory_data else {"Produce", "Bakery", "Dry Goods"}
     allowances = []
     for cat in available_categories:
         used = category_counts.get(cat, 0)
@@ -79,12 +79,12 @@ def build_system_prompt(dynamic_alert=""):
     allowance_text = "\n".join(allowances)
     basket_summary = str(basket) if basket else "Empty"
 
-    # Inject the alert directly into the main system prompt to prevent API crashes
     alert_section = f"\n\nCRITICAL REAL-TIME ALERT: {dynamic_alert}\n\n" if dynamic_alert else ""
 
     prompt = (
         "You are Monique, the gracious, eloquent, and deeply caring Floor Manager for Cultivating Community, a community food pantry in Washington, D.C. "
         "Your voice and tone embody the poise, warmth, and inspiring elegance of Michelle Obama—welcoming, dignified, articulate, and deeply supportive of our community.\n\n"
+        "CRITICAL RULE: You MUST always respond with at least one complete sentence. Never remain silent.\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
         f"{inventory_data}\n\n"
         "CURRENT VISITOR BASKET:\n"
@@ -93,9 +93,9 @@ def build_system_prompt(dynamic_alert=""):
         f"{allowance_text}"
         f"{alert_section}"
         "NON-PROFIT OPERATIONAL RULES:\n"
-        "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
-        "2. OUT OF STOCK ITEMS: If the visitor asks for an item (like bananas or oranges) that is NOT in the LIVE PANTRY INVENTORY DATABASE, politely inform them we do not have it today, and suggest an alternative we DO have.\n"
-        "3. SUGGESTIONS & LIMITS: If asked what to add, look at 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know. Suggest items from departments with remaining allowances.\n"
+        "1. OUT OF STOCK ITEMS: If the visitor asks for an item (like bananas, oranges, etc.) that is NOT in the LIVE PANTRY INVENTORY DATABASE, you MUST politely inform them that we do not have it today, and immediately suggest 2 specific alternatives from the database that we DO have.\n"
+        "2. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
+        "3. LIMITS: If asked what they can add, check 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know gently and suggest another department.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses.\n"
         "5. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
     )
@@ -138,25 +138,22 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.basket = {}
 
-# NLP Parsing: Now extracts quantities (1-3) and items
+# NLP Parsing
 def extract_quantity(text_lower, item_keywords):
-    """Simple heuristic to catch 'three apples', '2 bags', etc."""
     num_map = {"one": 1, "two": 2, "three": 3, "1": 1, "2": 2, "3": 3}
     words = text_lower.split()
     
     for i, word in enumerate(words):
         for kw in item_keywords:
             if kw in word:
-                # Look at the word immediately preceding the item for a number
                 if i > 0 and words[i-1] in num_map:
                     return num_map[words[i-1]]
     
-    # Fallback: check globally if a number is in the sentence
     for num_str, val in num_map.items():
         if re.search(r'\b' + num_str + r'\b', text_lower):
             return val
             
-    return 1 # Default to 1 if no quantity mentioned
+    return 1 
 
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
@@ -188,15 +185,12 @@ def check_and_auto_add_cart(user_text, inventory_items):
             current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
             cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
             
-            # Determine how many we can actually add without breaching the 3-item limit
             available_space = 3 - cat_count
             add_amount = min(req_qty, available_space, 3 - current_qty)
             
             if add_amount > 0:
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + add_amount}
                 added.append(iname)
-                
-                # If they asked for 3 but we only had space for 1, mark as partially rejected
                 if req_qty > add_amount:
                     rejected.append({"name": iname, "category": cat})
             else:
@@ -259,6 +253,7 @@ else:
         speak_text(st.session_state.speak_greeting)
         st.session_state.speak_greeting = False
 
+    # Render previous messages (skip system prompts)
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
@@ -286,11 +281,13 @@ else:
         user_input_text = chat_text
 
     if user_input_text:
+        # Keep chat history lean to prevent AI confusion (keep last 10 messages + 1 system)
+        if len(st.session_state.messages) > 11:
+            st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
+
         st.session_state.messages.append({"role": "user", "content": user_input_text})
-        
         added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
         
-        # Prepare dynamic alert context instead of appending a new system message block
         dynamic_context = ""
         if rejected_items:
             rej_names = [r["name"] for r in rejected_items]
@@ -305,7 +302,7 @@ else:
             
         with st.chat_message("assistant"):
             with st.spinner("Monique is reviewing your basket..."):
-                # Inject the updated system prompt (with any active alerts) into index 0
+                # Always ensure system prompt is at index 0 and fully updated
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
                     st.session_state.messages[0]["content"] = build_system_prompt(dynamic_context)
                 else:
@@ -315,13 +312,13 @@ else:
                     completion = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=st.session_state.messages,
-                        temperature=0.3,
-                        max_tokens=150
+                        temperature=0.4, # Slightly higher temp to prevent repetitive loops
+                        max_tokens=250   # Increased max tokens so she never cuts off
                     )
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
-                        response_text = "I've reviewed your request. Let me know if there's anything else you'd like to adjust in your basket."
+                        response_text = "I'm sorry, I didn't quite catch that. Could you please repeat what you'd like to add to your basket?"
                         
                     st.markdown(response_text)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
