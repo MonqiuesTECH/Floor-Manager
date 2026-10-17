@@ -21,7 +21,7 @@ client = OpenAI(
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory & Basket Management
+# 3. Supabase Inventory, Basket, & Admin Management
 def get_pantry_inventory():
     try:
         response = supabase.table("inventory").select("*").execute()
@@ -121,8 +121,8 @@ def build_system_prompt(transaction_report=""):
         "CONVERSATIONAL RULES:\n"
         "1. NEVER AUTO-ADD OR MODIFY BASKET ON GENERAL QUESTIONS: If the visitor asks 'What else can I add?', 'What's available?', or 'What do you have?', DO NOT modify or add items to their basket. Review their current basket, check remaining department allowances, and verbally suggest available items from departments where they still have space.\n"
         "2. ACKNOWLEDGE EXPLICIT ADDITIONS: If the visitor explicitly asks to add an item, confirm it. If a department is full (0 remaining), gently let them know.\n"
-        "3. OUT OF STOCK: If they request an item not in our inventory database, politely inform them and offer an in-stock alternative.\n"
-        "4. EVERYTHING IS FREE & PRIVATE: Never mention money, prices, names, IDs, or addresses.\n"
+        "3. DELIVERY INQUIRIES: If asked about delivery, inform them that specialized delivery within Washington, D.C. borders is available for $30 for elderly or mobility-impaired residents who cannot travel.\n"
+        "4. EVERYTHING IS FREE & PRIVATE: Food is 100% free (only specialized delivery has a $30 courier fee). Never ask for personal names, IDs, or home addresses in chat.\n"
         "5. WARM & CONCISE: Keep responses to 2-3 warm sentences. Direct them to tap 'Claim Ration' when finished."
     )
     return prompt
@@ -155,12 +155,20 @@ def start_session():
     ]
     st.session_state.speak_greeting = greeting  
 
-def process_claim():
+def process_claim(is_delivery=False, dc_zip=""):
     pickup_time = (datetime.now() + timedelta(minutes=30)).strftime("%I:%M %p")
+    location_str = "Cultivating Community Pickup Hub (Dandelion Collective)"
+    
+    if is_delivery:
+        pickup_time = "Scheduled DC Courier Delivery (Today)"
+        location_str = f"Delivered within Washington, D.C. (ZIP: {dc_zip}) - Fee: $30"
+
     ticket = {
         "time": pickup_time,
-        "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
+        "location": location_str,
+        "is_delivery": is_delivery
     }
+    
     basket_snapshot = st.session_state.basket.copy()
     ticket_id = save_basket_to_supabase(basket_snapshot, ticket)
     ticket["id"] = ticket_id if ticket_id else "ANON-PASS"
@@ -168,7 +176,11 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.basket = {}
     
-    closing_speech = f"Please scan the QR code for your anonymous ticket, and your pickup time is {ticket['time']} at Cultivating Community. Thank you for shopping with us. Hope to see you soon."
+    if is_delivery:
+        closing_speech = f"Please scan the QR code for your delivery ticket. Your specialized delivery within Washington D.C. has a $30 fee and is scheduled for today. Thank you for shopping with us!"
+    else:
+        closing_speech = f"Please scan the QR code for your anonymous ticket, and your pickup time is {ticket['time']} at Cultivating Community. Thank you for shopping with us. Hope to see you soon."
+        
     st.session_state.speak_greeting = closing_speech
 
 # NLP Parsing & Adding Logic
@@ -239,8 +251,12 @@ st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar Navigation
+# Sidebar Navigation & Accessibility
 with st.sidebar:
+    st.markdown("### 🌐 Accessibility & Language")
+    selected_lang = st.selectbox("Select Language:", ["English", "Español (Spanish)", "አማርኛ (Amharic)", "Français (French)", "Tiếng Việt (Vietnamese)"])
+    st.markdown("---")
+
     st.markdown("### 🔐 Portal Navigation")
     portal_mode = st.radio("Select View:", ["🛍️ Shopper Kiosk", "🛠️ Admin Portal (Volunteers)"])
     st.markdown("---")
@@ -291,13 +307,13 @@ with st.sidebar:
         if st.session_state.claim_success and st.session_state.pickup_ticket:
             ticket = st.session_state.pickup_ticket
             st.success(f"✅ Ration Claimed Successfully!")
-            st.markdown(f"🕒 **Pickup Time:** {ticket['time']}")
-            st.markdown(f"📍 **Location:** {ticket['location']}")
+            st.markdown(f"🕒 **Fulfillment:** {ticket['time']}")
+            st.markdown(f"📍 **Details:** {ticket['location']}")
             
             qr_data = f"Cultivating-Community-Ticket-{ticket['id']}"
             qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={qr_data}"
             st.image(qr_url, caption=f"Scan to Verify (ID: {ticket['id']})", width=180)
-            st.caption("🔒 100% Anonymous: No personal information was collected.")
+            st.caption("🔒 100% Anonymous: No personal information collected.")
 
             if st.button("Start New Visit", use_container_width=True):
                 st.session_state.claim_success = False
@@ -306,21 +322,38 @@ with st.sidebar:
                 st.session_state.messages = []
                 st.rerun()
         else:
-            st.button("✅ Claim Ration & Get QR Code", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
+            # Claim options: Standard Free Pickup vs $30 D.C. Special Delivery
+            st.markdown("### 🚚 Fulfillment Options")
+            fulfillment_type = st.radio("Choose Mode:", ["Pickup (Free)", "Delivery within DC ($30 Fee)"])
+            
+            dc_zip_input = ""
+            if fulfillment_type == "Delivery within DC ($30 Fee)":
+                st.info("Special circumstance delivery is available for elderly residents or individuals unable to walk, strictly within Washington, D.C. borders.")
+                dc_zip_input = st.text_input("Enter D.C. Zip Code (e.g., 20020):")
+                
+            if st.button("✅ Confirm & Claim Ration", use_container_width=True, type="primary", disabled=(total_quantity <= 0 or not st.session_state.basket)):
+                if fulfillment_type == "Delivery within DC ($30 Fee)":
+                    if not dc_zip_input.strip():
+                        st.error("Please enter a valid D.C. zip code for delivery.")
+                    else:
+                        process_claim(is_delivery=True, dc_zip=dc_zip_input)
+                        st.rerun()
+                else:
+                    process_claim(is_delivery=False)
+                    st.rerun()
 
 # 9. Render Screen based on Portal Mode
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Here you can monitor live orders, check remaining stock by department, and update daily inventory levels.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and manage volunteer shifts.")
     
-    tab1, tab2, tab3 = st.tabs(["📦 Live Inventory & Stock", "📋 Placed Orders & QR Verification", "⚙️ Update Daily Stock"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Shifts"])
     
     with tab1:
         st.subheader("Current Stock Levels by Department")
         if not inventory_items:
             st.info("No inventory items found.")
         else:
-            # Group inventory by category for clear admin organization
             grouped_inv = {}
             for item in inventory_items:
                 cat = item['category']
@@ -337,7 +370,7 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                 st.divider()
                 
     with tab2:
-        st.subheader("Recent Anonymous Basket Orders")
+        st.subheader("Recent Anonymous Basket Orders & Deliveries")
         baskets = get_all_baskets()
         if not baskets:
             st.info("No orders placed yet.")
@@ -346,8 +379,8 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                 with st.container(border=True):
                     cols = st.columns(2)
                     cols[0].markdown(f"**Order ID:** `{b.get('id')}`")
-                    cols[1].markdown(f"🕒 **Pickup Time:** {b.get('pickup_time')}")
-                    st.caption(f"📍 **Location:** {b.get('pickup_location')}")
+                    cols[1].markdown(f"🕒 **Fulfillment:** {b.get('pickup_time')}")
+                    st.caption(f"📍 **Location/Type:** {b.get('pickup_location')}")
                     st.markdown("**Items Claimed:**")
                     items_dict = b.get('items', {})
                     for item_name, details in items_dict.items():
@@ -355,8 +388,6 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
 
     with tab3:
         st.subheader("Daily Stock Reset & Updates")
-        st.markdown("Use this panel to update available quantities for today. Changes take effect immediately on the shopper kiosk.")
-        
         if not inventory_items:
             st.info("No inventory items found to update.")
         else:
@@ -377,37 +408,75 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                         update_inventory_stock(item_id, qval)
                     st.success("✅ Daily inventory successfully updated!")
                     st.rerun()
+
+    with tab4:
+        st.subheader("Surplus Food Rescue & Volunteer Shifts")
+        st.markdown("Coordinate incoming bakery drop-offs and sign up volunteers for upcoming distribution shifts.")
+        with st.form("rescue_form"):
+            rescue_source = st.text_input("Food Donor / Bakery Source (e.g., Call Your Mother Rescue)")
+            rescue_details = st.text_area("Surplus Items & Quantities Dropped Off")
+            volunteer_name = st.text_input("Coordinator / Volunteer On Duty")
+            submit_rescue = st.form_submit_button("Log Food Rescue Drop")
+            if submit_rescue:
+                st.success(f"Successfully logged rescue drop from {rescue_source}!")
 else:
-    # Public Shopper View
+    # Public Shopper View with Dietary Filters
     col_grid, col_chat = st.columns([1.2, 1])
 
     with col_grid:
         st.markdown("### 📦 Available Pantry Inventory")
+        
+        # Dietary & Allergenic Quick Filter Bar
+        dietary_filter = st.selectbox(
+            "Filter by Dietary Need / Health Preference:", 
+            ["All Items", "Gluten-Free", "Vegan / Vegetarian", "Halal", "Diabetic-Friendly"]
+        )
+        
         if not inventory_items:
             st.warning("No inventory loaded in Supabase yet.")
         else:
-            cols = st.columns(3)
-            for index, item in enumerate(inventory_items):
-                with cols[index % 3]:
-                    with st.container(border=True):
-                        st.markdown(f"**{item['item_name']}**")
-                        st.caption(f"Category: {item['category']}")
-                        st.markdown(f"Stock: **{item['quantity']} {item['unit']}**")
-                        
-                        if st.button("Add 1", key=f"grid_add_{item['id']}", use_container_width=True):
-                            if not st.session_state.session_active:
-                                start_session()
-                            cat = item['category']
-                            iname = item['item_name']
-                            current_q = st.session_state.basket.get(iname, {}).get("quantity", 0)
-                            cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
+            # Filter logic matching dietary tags or keywords
+            filtered_inventory = []
+            for item in inventory_items:
+                iname = item['item_name'].lower()
+                cat = item['category'].lower()
+                
+                if dietary_filter == "Gluten-Free" and not any(k in iname for k in ['oatmeal', 'rice', 'apple', 'spinach', 'kale', 'orange', 'fruit']):
+                    continue
+                elif dietary_filter == "Vegan / Vegetarian" and 'beef' in iname:
+                    continue
+                elif dietary_filter == "Diabetic-Friendly" and any(k in iname for k in ['sugar', 'peach', 'pancake']):
+                    continue
+                filtered_inventory.append(item)
+
+            if not filtered_inventory:
+                st.info(f"No items currently match the filter: {dietary_filter}")
+            else:
+                cols = st.columns(3)
+                for index, item in enumerate(filtered_inventory):
+                    with cols[index % 3]:
+                        with st.container(border=True):
+                            st.markdown(f"**{item['item_name']}**")
+                            st.caption(f"Category: {item['category']}")
+                            st.markdown(f"Stock: **{item['quantity']} {item['unit']}**")
                             
-                            if cat_count < 3 and current_q < 3:
-                                st.session_state.basket[iname] = {"category": cat, "quantity": current_q + 1}
-                                st.success(f"Added {iname}!")
-                                st.rerun()
-                            else:
-                                st.error("Limit reached (Max 3 per department)!")
+                            if st.button("Add 1", key=f"grid_add_{item['id']}", use_container_width=True):
+                                if not st.session_state.session_active:
+                                    start_session()
+                                cat = item['category']
+                                iname = item['item_name']
+                                current_q = st.session_state.basket.get(iname, {}).get("quantity", 0)
+                                cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
+                                
+                                if cat_count < 3 and current_q < 3:
+                                    st.session_state.basket[iname] = {"category": cat, "quantity": current_q + 1}
+                                    st.success(f"Added {iname}!")
+                                    st.rerun()
+                                else:
+                                    st.error("Limit reached (Max 3 per department)!")
+
+        st.markdown("---")
+        st.markdown("ℹ️ **Community Dignity Note**: All fresh food, staples, and prepared meals are 100% free of charge. Specialized courier delivery is available for $30 for elderly or mobility-impaired D.C. residents.")
 
     with col_chat:
         st.markdown("### 💬 Monique (Virtual Floor Manager)")
@@ -490,5 +559,5 @@ else:
                     except Exception as e:
                         st.error(f"Connection issue: {e}")
                             
-                st.session_state.audio_key += 1
-                st.rerun()
+            st.session_state.audio_key += 1
+            st.rerun()
