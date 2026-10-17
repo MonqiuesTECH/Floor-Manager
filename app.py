@@ -9,14 +9,10 @@ from datetime import datetime, timedelta
 # 1. Page Configuration
 st.set_page_config(page_title="Pantry Floor Manager", page_icon="🍲", layout="wide")
 
-# 2. Secure Secret Configuration
+# 2. Direct Credentials Configuration
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
-SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY", ""))
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-
-if not GROQ_API_KEY or not SUPABASE_KEY:
-    st.error("🚨 Please ensure SUPABASE_KEY and GROQ_API_KEY are configured in your Streamlit secrets (.streamlit/secrets.toml).")
-    st.stop()
+SUPABASE_KEY = "sb_publishable_vlLsuD4DIgnL2fqpbr6QLQ_VsYWsAqm"
+GROQ_API_KEY = "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"
 
 client = OpenAI(
     api_key=GROQ_API_KEY,
@@ -199,18 +195,30 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 
     return added, rejected
 
-# 8. Main UI Layout (Visual Grid + Sidebar POS Style)
+# 8. Main UI Layout (Visual Grid + Categorized Sidebar POS Style)
 st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar: Basket, QR Ticket & Summary
+# Sidebar: Categorized Basket Inspector & QR Ticket
 with st.sidebar:
     st.markdown("### 🛒 Your Custom Basket")
     if st.session_state.basket:
+        # Group items by category for clean department organization
+        grouped_basket = {}
         for item_name, details in st.session_state.basket.items():
-            st.text(f"• {item_name} (Qty: {details['quantity']})")
+            cat = details['category']
+            if cat not in grouped_basket:
+                grouped_basket[cat] = []
+            grouped_basket[cat].append((item_name, details['quantity']))
+            
+        for cat, items in grouped_basket.items():
+            st.markdown(f"**📂 {cat}**")
+            for item_name, qty in items:
+                st.text(f"  • {item_name} (Qty: {qty})")
+                
+        st.markdown("")
         if st.button("Clear Basket", use_container_width=True):
             st.session_state.basket = {}
             st.rerun()
@@ -313,10 +321,8 @@ with col_chat:
 
             st.session_state.messages.append({"role": "user", "content": user_input_text})
             
-            # Execute cart check BEFORE asking Monique to reply
             added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
             
-            # Build explicit transaction report for the AI
             report_lines = []
             if added_items:
                 added_desc = [f"{i['qty']}x {i['name']} ({i['category']})" for i in added_items]
@@ -330,7 +336,6 @@ with col_chat:
             transaction_report = "\n".join(report_lines)
                 
             with st.spinner("Monique is responding..."):
-                # Update system prompt with the exact transaction report
                 system_prompt = build_system_prompt(transaction_report)
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
                     st.session_state.messages[0]["content"] = system_prompt
