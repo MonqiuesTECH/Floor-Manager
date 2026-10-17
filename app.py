@@ -34,7 +34,6 @@ def get_pantry_inventory():
         return []
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
-    """Saves the basket anonymously and returns the unique record ID for the QR code."""
     try:
         response = supabase.table("baskets").insert({
             "items": basket_data,
@@ -63,8 +62,8 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt
-def build_system_prompt(dynamic_alert=""):
+# 5. Dynamic System Prompt with Precise Transaction Feedback
+def build_system_prompt(transaction_report=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
     
@@ -78,30 +77,29 @@ def build_system_prompt(dynamic_alert=""):
     for cat in available_categories:
         used = category_counts.get(cat, 0)
         remaining = max(0, 3 - used)
-        allowances.append(f"- {cat}: {remaining} items remaining")
+        allowances.append(f"- {cat}: {remaining} items remaining (Used {used}/3)")
         
     allowance_text = "\n".join(allowances)
     basket_summary = str(basket) if basket else "Empty"
 
-    alert_section = f"\n\nCRITICAL REAL-TIME ALERT: {dynamic_alert}\n\n" if dynamic_alert else ""
+    transaction_section = f"\n\nIMMEDIATE ACTION REPORT (What just happened on this turn):\n{transaction_report}\n\n" if transaction_report else ""
 
     prompt = (
         "You are Monique, the gracious, eloquent, and deeply caring Floor Manager for Cultivating Community, a community food pantry in Washington, D.C. "
         "Your voice and tone embody the poise, warmth, and inspiring elegance of Michelle Obama—welcoming, dignified, articulate, and deeply supportive of our community.\n\n"
-        "CRITICAL RULE: You MUST always respond with at least one complete sentence. Never remain silent.\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
         f"{inventory_data}\n\n"
         "CURRENT VISITOR BASKET:\n"
         f"{basket_summary}\n\n"
         "REMAINING DEPARTMENT ALLOWANCES (Max 3 per department):\n"
         f"{allowance_text}"
-        f"{alert_section}"
-        "NON-PROFIT OPERATIONAL RULES:\n"
-        "1. OUT OF STOCK ITEMS: If the visitor asks for an item that is NOT in the LIVE PANTRY INVENTORY DATABASE, politely inform them that we do not have it today, and immediately suggest 2 specific alternatives from the database that we DO have.\n"
-        "2. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
-        "3. LIMITS: If asked what they can add, check 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know gently and suggest another department.\n"
-        "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses. Emphasize that their pickup is 100% anonymous via a QR code.\n"
-        "5. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
+        f"{transaction_section}"
+        "CONVERSATIONAL RULES:\n"
+        "1. ACKNOWLEDGE ACTION: If items were successfully added in the action report, warmly confirm them. If items were rejected because a department is full (0 remaining), gently explain that the department limit has been reached.\n"
+        "2. SUGGESTIONS: Always look at the remaining allowances. Tell the visitor what departments still have space and suggest specific items from those departments that are in stock.\n"
+        "3. OUT OF STOCK: If they request an item not in our inventory database, politely let them know and offer a similar alternative we do have.\n"
+        "4. EVERYTHING IS FREE & PRIVATE: Never mention money, prices, names, IDs, or addresses.\n"
+        "5. WARM & CONCISE: Keep responses to 2-3 warm sentences. Direct them to tap 'Claim Ration' when finished."
     )
     return prompt
 
@@ -137,11 +135,8 @@ def process_claim():
         "time": pickup_time,
         "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
-    
-    # Save to Supabase and get the anonymous record ID
     basket_snapshot = st.session_state.basket.copy()
     ticket_id = save_basket_to_supabase(basket_snapshot, ticket)
-    
     ticket["id"] = ticket_id if ticket_id else "ANON-PASS"
     st.session_state.pickup_ticket = ticket
     st.session_state.claim_success = True
@@ -196,11 +191,11 @@ def check_and_auto_add_cart(user_text, inventory_items):
             
             if add_amount > 0:
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + add_amount}
-                added.append(iname)
+                added.append({"name": iname, "qty": add_amount, "category": cat})
                 if req_qty > add_amount:
-                    rejected.append({"name": iname, "category": cat})
+                    rejected.append({"name": iname, "category": cat, "reason": "limit_reached"})
             else:
-                rejected.append({"name": iname, "category": cat})
+                rejected.append({"name": iname, "category": cat, "reason": "limit_reached"})
                 
     return added, rejected
 
@@ -231,7 +226,6 @@ with st.sidebar:
         st.markdown(f"🕒 **Pickup Time:** {ticket['time']}")
         st.markdown(f"📍 **Location:** {ticket['location']}")
         
-        # Generate Anonymous QR Code pointing to the Supabase record ID
         qr_data = f"Cultivating-Community-Ticket-{ticket['id']}"
         qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={qr_data}"
         st.image(qr_url, caption=f"Scan to Verify (ID: {ticket['id']})", width=180)
@@ -318,34 +312,42 @@ with col_chat:
                 st.session_state.messages = [st.session_state.messages[0]] + st.session_state.messages[-10:]
 
             st.session_state.messages.append({"role": "user", "content": user_input_text})
+            
+            # Execute cart check BEFORE asking Monique to reply
             added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
             
-            dynamic_context = ""
+            # Build explicit transaction report for the AI
+            report_lines = []
+            if added_items:
+                added_desc = [f"{i['qty']}x {i['name']} ({i['category']})" for i in added_items]
+                report_lines.append(f"- Successfully added to basket: {', '.join(added_desc)}")
             if rejected_items:
-                rej_names = [r["name"] for r in rejected_items]
-                rej_cat = rejected_items[0]["category"]
-                dynamic_context = (
-                    f"The visitor just tried to add {', '.join(rej_names)}, but they already hit their 3-item limit for the '{rej_cat}' department. "
-                    f"You MUST explicitly tell them they cannot add any more {rej_cat} items right now, and suggest something else."
-                )
+                rej_desc = [r['name'] for r in rejected_items]
+                report_lines.append(f"- Blocked/Rejected (Department limit of 3 reached): {', '.join(rej_desc)}")
+            if not added_items and not rejected_items:
+                report_lines.append("- No specific inventory items were added or matched on this turn (general inquiry or out-of-stock request).")
+                
+            transaction_report = "\n".join(report_lines)
                 
             with st.spinner("Monique is responding..."):
+                # Update system prompt with the exact transaction report
+                system_prompt = build_system_prompt(transaction_report)
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
-                    st.session_state.messages[0]["content"] = build_system_prompt(dynamic_context)
+                    st.session_state.messages[0]["content"] = system_prompt
                 else:
-                    st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt(dynamic_context)})
+                    st.session_state.messages.insert(0, {"role": "system", "content": system_prompt})
                 
                 try:
                     completion = client.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=st.session_state.messages,
-                        temperature=0.4,
+                        temperature=0.3,
                         max_tokens=250
                     )
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
-                        response_text = "I'm sorry, I didn't quite catch that. Could you please repeat what you'd like to add to your basket?"
+                        response_text = "I've updated your basket selections. Let me know what else you'd like to explore today!"
                         
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
                     st.session_state.speak_greeting = response_text
