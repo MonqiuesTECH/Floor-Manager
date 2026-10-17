@@ -19,9 +19,14 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+@st.cache_resource
+def init_supabase():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# 3. Supabase Inventory, Basket, & Admin Management
+supabase = init_supabase()
+
+# 3. Cached Supabase Inventory & Basket Management
+@st.cache_data(ttl=30)
 def get_pantry_inventory():
     try:
         response = supabase.table("inventory").select("*").execute()
@@ -29,6 +34,7 @@ def get_pantry_inventory():
     except Exception as e:
         return []
 
+@st.cache_data(ttl=15)
 def get_all_baskets():
     try:
         response = supabase.table("baskets").select("*").order("created_at", desc=True).execute()
@@ -43,6 +49,7 @@ def get_all_baskets():
 def update_inventory_stock(item_id, new_quantity):
     try:
         supabase.table("inventory").update({"quantity": new_quantity}).eq("id", item_id).execute()
+        st.cache_data.clear() # Clear cache on write
     except Exception as e:
         print(f"Error updating stock: {e}")
 
@@ -65,6 +72,7 @@ def save_basket_to_supabase(basket_data, pickup_ticket):
                     new_stock = max(0, current_stock - claimed_qty)
                     update_inventory_stock(inv['id'], new_stock)
 
+        st.cache_data.clear()
         return ticket_id
     except Exception as e:
         print(f"Error saving basket or decrementing stock: {e}")
@@ -344,9 +352,9 @@ with st.sidebar:
 # 9. Render Screen based on Portal Mode
 if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin_logged_in:
     st.header("🛠️ Cultivating Community — Admin Dashboard")
-    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and manage volunteer shifts.")
+    st.markdown("Welcome, team! Monitor live orders, check department inventory, coordinate food rescue, and track fundraising revenue splits.")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Shifts"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📦 Live Inventory", "📋 Placed Orders", "⚙️ Update Stock", "🤝 Food Rescue & Revenue"])
     
     with tab1:
         st.subheader("Current Stock Levels by Department")
@@ -409,15 +417,24 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     st.rerun()
 
     with tab4:
-        st.subheader("Surplus Food Rescue & Volunteer Shifts")
-        st.markdown("Coordinate incoming bakery drop-offs and sign up volunteers for upcoming distribution shifts.")
+        st.subheader("🤝 Surplus Food Rescue & Fundraising Revenue Split")
+        st.markdown("Log incoming bakery drop-offs and track event fundraising splits (80% to Cultivating Community nonprofit initiatives & Wards 7/8 walk-in store fund / 20% operations).")
+        
         with st.form("rescue_form"):
+            st.markdown("#### Log Surplus Food Rescue")
             rescue_source = st.text_input("Food Donor / Bakery Source (e.g., Call Your Mother Rescue)")
             rescue_details = st.text_area("Surplus Items & Quantities Dropped Off")
             volunteer_name = st.text_input("Coordinator / Volunteer On Duty")
             submit_rescue = st.form_submit_button("Log Food Rescue Drop")
             if submit_rescue:
                 st.success(f"Successfully logged rescue drop from {rescue_source}!")
+
+        st.markdown("---")
+        st.markdown("#### 📊 Fundraising & Revenue Split Tracker")
+        col_rev1, col_rev2 = st.columns(2)
+        col_rev1.metric(label="Total 80% Nonprofit Allocation (Wards 7/8 Store Fund)", value="$24,000 / mo")
+        col_rev2.metric(label="Total 20% Event Operations Split", value="$6,000 / mo")
+        st.caption("Active model aligned with Friday Night Fight Night capital allocations and community donations.")
 else:
     # Public Shopper View: Catalog Grid on Left, Monique Chat on Right
     col_grid, col_chat = st.columns([1.2, 1])
