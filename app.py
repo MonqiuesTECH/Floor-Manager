@@ -34,14 +34,18 @@ def get_pantry_inventory():
         return []
 
 def save_basket_to_supabase(basket_data, pickup_ticket):
+    """Saves the basket anonymously and returns the unique record ID for the QR code."""
     try:
-        supabase.table("baskets").insert({
+        response = supabase.table("baskets").insert({
             "items": basket_data,
             "pickup_time": pickup_ticket["time"],
             "pickup_location": pickup_ticket["location"]
         }).execute()
+        if response.data:
+            return response.data[0].get('id')
     except Exception as e:
         print(f"Error saving basket to Supabase: {e}")
+    return None
 
 # 4. Zero-Cost Browser Text-to-Speech JS Injection
 def speak_text(text):
@@ -96,7 +100,7 @@ def build_system_prompt(dynamic_alert=""):
         "1. OUT OF STOCK ITEMS: If the visitor asks for an item that is NOT in the LIVE PANTRY INVENTORY DATABASE, politely inform them that we do not have it today, and immediately suggest 2 specific alternatives from the database that we DO have.\n"
         "2. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
         "3. LIMITS: If asked what they can add, check 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know gently and suggest another department.\n"
-        "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses.\n"
+        "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses. Emphasize that their pickup is 100% anonymous via a QR code.\n"
         "5. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
     )
     return prompt
@@ -133,7 +137,12 @@ def process_claim():
         "time": pickup_time,
         "location": "Cultivating Community Pickup Hub (Dandelion Collective)"
     }
-    save_basket_to_supabase(st.session_state.basket, ticket)
+    
+    # Save to Supabase and get the anonymous record ID
+    basket_snapshot = st.session_state.basket.copy()
+    ticket_id = save_basket_to_supabase(basket_snapshot, ticket)
+    
+    ticket["id"] = ticket_id if ticket_id else "ANON-PASS"
     st.session_state.pickup_ticket = ticket
     st.session_state.claim_success = True
     st.session_state.basket = {}
@@ -201,7 +210,7 @@ st.title("🍲 Cultivating Community — Floor Manager Kiosk")
 inventory_items = get_pantry_inventory()
 total_quantity = sum([item.get('quantity', 0) for item in inventory_items])
 
-# Sidebar: Basket & Summary
+# Sidebar: Basket, QR Ticket & Summary
 with st.sidebar:
     st.markdown("### 🛒 Your Custom Basket")
     if st.session_state.basket:
@@ -218,7 +227,16 @@ with st.sidebar:
     
     if st.session_state.claim_success and st.session_state.pickup_ticket:
         ticket = st.session_state.pickup_ticket
-        st.success(f"✅ Claimed! Pick up at **{ticket['time']}** at **{ticket['location']}**.")
+        st.success(f"✅ Ration Claimed Successfully!")
+        st.markdown(f"🕒 **Pickup Time:** {ticket['time']}")
+        st.markdown(f"📍 **Location:** {ticket['location']}")
+        
+        # Generate Anonymous QR Code pointing to the Supabase record ID
+        qr_data = f"Cultivating-Community-Ticket-{ticket['id']}"
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={qr_data}"
+        st.image(qr_url, caption=f"Scan to Verify (ID: {ticket['id']})", width=180)
+        st.caption("🔒 100% Anonymous: No personal information was collected.")
+
         if st.button("Start New Visit", use_container_width=True):
             st.session_state.claim_success = False
             st.session_state.pickup_ticket = None
@@ -226,7 +244,7 @@ with st.sidebar:
             st.session_state.messages = []
             st.rerun()
     else:
-        st.button("✅ Claim Ration", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
+        st.button("✅ Claim Ration & Get QR Code", use_container_width=True, type="primary", on_click=process_claim, disabled=(total_quantity <= 0 or not st.session_state.basket))
 
 # Main Body Split: Left = Visual Grid of Inventory Cards, Right = Monique Chat
 col_grid, col_chat = st.columns([1.2, 1])
@@ -236,7 +254,6 @@ with col_grid:
     if not inventory_items:
         st.warning("No inventory loaded in Supabase yet.")
     else:
-        # Display items in a responsive 3-column card grid
         cols = st.columns(3)
         for index, item in enumerate(inventory_items):
             with cols[index % 3]:
@@ -271,7 +288,6 @@ with col_chat:
             speak_text(st.session_state.speak_greeting)
             st.session_state.speak_greeting = False
 
-        # Render chat messages container
         chat_container = st.container(height=400)
         with chat_container:
             for msg in st.session_state.messages:
@@ -279,7 +295,6 @@ with col_chat:
                     with st.chat_message(msg["role"]):
                         st.markdown(msg["content"])
 
-        # Input controls
         user_input_text = ""
         audio_value = st.audio_input("🎤 Tap to talk", key=f"mic_{st.session_state.audio_key}")
         chat_text = st.chat_input("✨ Or type your request...")
