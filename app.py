@@ -59,24 +59,43 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt
+# 5. Dynamic System Prompt with Allowance Math & Suggestions
 def build_system_prompt():
     inventory_data = get_pantry_inventory()
-    basket_data = st.session_state.get("basket", {})
+    basket = st.session_state.get("basket", {})
+    
+    # Calculate exactly how many items they have left in each department
+    category_counts = {}
+    for item_name, details in basket.items():
+        cat = details['category']
+        category_counts[cat] = category_counts.get(cat, 0) + details['quantity']
+        
+    available_categories = {item['category'] for item in inventory_data}
+    allowances = []
+    for cat in available_categories:
+        used = category_counts.get(cat, 0)
+        remaining = max(0, 3 - used)
+        allowances.append(f"- {cat}: {remaining} items remaining")
+        
+    allowance_text = "\n".join(allowances)
+    basket_summary = str(basket) if basket else "Empty"
+
     prompt = (
         "You are Monique, the gracious, eloquent, and deeply caring Floor Manager for Cultivating Community, a community food pantry in Washington, D.C. "
         "Your voice and tone embody the poise, warmth, and inspiring elegance of Michelle Obama—welcoming, dignified, articulate, and deeply supportive of our community.\n\n"
         "LIVE PANTRY INVENTORY DATABASE:\n"
         f"{inventory_data}\n\n"
-        "CURRENT VISITOR BASKET (What they have selected so far):\n"
-        f"{basket_data}\n\n"
+        "CURRENT VISITOR BASKET:\n"
+        f"{basket_summary}\n\n"
+        "REMAINING DEPARTMENT ALLOWANCES (Max 3 per department):\n"
+        f"{allowance_text}\n\n"
         "NON-PROFIT OPERATIONAL RULES:\n"
-        "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments. All food is completely free of charge.\n"
-        "2. BASKET & LIMITS: Visitors can choose up to 3 items from each food department. Acknowledge what they have added to their basket with grace and let them know what else they can pick.\n"
-        "3. ACCURATE STOCK & FLEXIBILITY: Accurately answer what items we have in stock using ONLY the live inventory database.\n"
-        "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, addresses, immigration status, or reasons for needing assistance.\n"
-        "5. DYNAMIC LANGUAGE MATCHING: Detect the visitor's language automatically and respond in the EXACT SAME language.\n"
-        "6. CONCISE & ACTION-ORIENTED: Keep all responses to 1-2 warm, polished sentences. Direct visitors to check their basket on the sidebar and tap the green 'Claim Ration' button when they're finished."
+        "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
+        "2. SUGGESTIONS & LIMITS: If the visitor asks what they can add or what is available, look at their 'REMAINING DEPARTMENT ALLOWANCES'. Politely inform them if any category is full (0 remaining), and suggest 2 or 3 specific items from the inventory that belong to departments where they still have space.\n"
+        "3. ACCURATE STOCK: Only suggest items that are currently in the live inventory database.\n"
+        "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses.\n"
+        "5. DYNAMIC LANGUAGE: Respond in the EXACT SAME language the visitor uses.\n"
+        "6. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
     )
     return prompt
 
@@ -127,7 +146,6 @@ def check_and_auto_add_cart(user_text, inventory_items):
         iname = item['item_name']
         iname_lower = iname.lower()
         
-        # Filter out common filler words to prevent false triggers
         stop_words = {'fresh', 'canned', 'bags', 'bundles', 'artisan', 'call', 'your', 'mother', 'and', 'the', 'with', 'some'}
         key_words = [w for w in iname_lower.split() if w not in stop_words and len(w) > 2]
         
@@ -137,7 +155,6 @@ def check_and_auto_add_cart(user_text, inventory_items):
         else:
             for kw in key_words:
                 base_word = kw.rstrip('s')
-                # Strict regex boundary match for singular and plural
                 pattern = r'\b' + re.escape(base_word) + r'(?:s|es)?\b'
                 if re.search(pattern, text_lower):
                     matched = True
@@ -152,7 +169,6 @@ def check_and_auto_add_cart(user_text, inventory_items):
                 st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
                 added.append(iname)
             else:
-                # Track items blocked by the 3-item limit rule
                 rejected.append({"name": iname, "category": cat})
                 
     return added, rejected
@@ -212,7 +228,6 @@ else:
         speak_text(st.session_state.speak_greeting)
         st.session_state.speak_greeting = False
 
-    # Display chat history
     for msg in st.session_state.messages:
         if msg["role"] != "system":
             with st.chat_message(msg["role"]):
@@ -239,14 +254,11 @@ else:
     elif chat_text:
         user_input_text = chat_text
 
-    # Handle incoming user message
     if user_input_text:
         st.session_state.messages.append({"role": "user", "content": user_input_text})
         
-        # Auto-parse items and detect limit rejections
         added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
         
-        # Provide strict AI context on limits so she explains gracefully
         if rejected_items:
             rej_names = [r["name"] for r in rejected_items]
             rej_cat = rejected_items[0]["category"]
@@ -276,7 +288,7 @@ else:
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
-                        response_text = "I've reviewed your basket. Is there anything else you'd like to add today?"
+                        response_text = "Your basket is looking wonderful. May I suggest adding some hearty grains or fresh greens to complete your selection?"
                         
                     st.markdown(response_text)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
