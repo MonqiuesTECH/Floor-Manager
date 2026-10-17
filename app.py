@@ -59,12 +59,11 @@ def speak_text(text):
     )
     components.html(js_code, height=0, width=0)
 
-# 5. Dynamic System Prompt with Allowance Math & Suggestions
-def build_system_prompt():
+# 5. Dynamic System Prompt with Real-Time Alerts & Out-of-Stock Logic
+def build_system_prompt(dynamic_alert=""):
     inventory_data = get_pantry_inventory()
     basket = st.session_state.get("basket", {})
     
-    # Calculate exactly how many items they have left in each department
     category_counts = {}
     for item_name, details in basket.items():
         cat = details['category']
@@ -80,6 +79,9 @@ def build_system_prompt():
     allowance_text = "\n".join(allowances)
     basket_summary = str(basket) if basket else "Empty"
 
+    # Inject the alert directly into the main system prompt to prevent API crashes
+    alert_section = f"\n\nCRITICAL REAL-TIME ALERT: {dynamic_alert}\n\n" if dynamic_alert else ""
+
     prompt = (
         "You are Monique, the gracious, eloquent, and deeply caring Floor Manager for Cultivating Community, a community food pantry in Washington, D.C. "
         "Your voice and tone embody the poise, warmth, and inspiring elegance of Michelle Obama—welcoming, dignified, articulate, and deeply supportive of our community.\n\n"
@@ -88,14 +90,14 @@ def build_system_prompt():
         "CURRENT VISITOR BASKET:\n"
         f"{basket_summary}\n\n"
         "REMAINING DEPARTMENT ALLOWANCES (Max 3 per department):\n"
-        f"{allowance_text}\n\n"
+        f"{allowance_text}"
+        f"{alert_section}"
         "NON-PROFIT OPERATIONAL RULES:\n"
         "1. EVERYTHING IS 100% FREE: Never discuss buying, selling, prices, or payments.\n"
-        "2. SUGGESTIONS & LIMITS: If the visitor asks what they can add or what is available, look at their 'REMAINING DEPARTMENT ALLOWANCES'. Politely inform them if any category is full (0 remaining), and suggest 2 or 3 specific items from the inventory that belong to departments where they still have space.\n"
-        "3. ACCURATE STOCK: Only suggest items that are currently in the live inventory database.\n"
+        "2. OUT OF STOCK ITEMS: If the visitor asks for an item (like bananas or oranges) that is NOT in the LIVE PANTRY INVENTORY DATABASE, politely inform them we do not have it today, and suggest an alternative we DO have.\n"
+        "3. SUGGESTIONS & LIMITS: If asked what to add, look at 'REMAINING DEPARTMENT ALLOWANCES'. If a category is full, let them know. Suggest items from departments with remaining allowances.\n"
         "4. ABSOLUTE PRIVACY: NEVER ask for names, IDs, phone numbers, or addresses.\n"
-        "5. DYNAMIC LANGUAGE: Respond in the EXACT SAME language the visitor uses.\n"
-        "6. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
+        "5. CONCISE & WARM: Keep responses to 2-3 polished sentences. Direct visitors to check their basket on the sidebar and tap 'Claim Ration' when finished."
     )
     return prompt
 
@@ -136,7 +138,26 @@ def process_claim():
     st.session_state.claim_success = True
     st.session_state.basket = {}
 
-# Advanced NLP Item Parsing & Limit Detection
+# NLP Parsing: Now extracts quantities (1-3) and items
+def extract_quantity(text_lower, item_keywords):
+    """Simple heuristic to catch 'three apples', '2 bags', etc."""
+    num_map = {"one": 1, "two": 2, "three": 3, "1": 1, "2": 2, "3": 3}
+    words = text_lower.split()
+    
+    for i, word in enumerate(words):
+        for kw in item_keywords:
+            if kw in word:
+                # Look at the word immediately preceding the item for a number
+                if i > 0 and words[i-1] in num_map:
+                    return num_map[words[i-1]]
+    
+    # Fallback: check globally if a number is in the sentence
+    for num_str, val in num_map.items():
+        if re.search(r'\b' + num_str + r'\b', text_lower):
+            return val
+            
+    return 1 # Default to 1 if no quantity mentioned
+
 def check_and_auto_add_cart(user_text, inventory_items):
     text_lower = user_text.lower()
     added = []
@@ -162,12 +183,22 @@ def check_and_auto_add_cart(user_text, inventory_items):
                     
         if matched:
             cat = item['category']
+            req_qty = extract_quantity(text_lower, key_words)
+            
             current_qty = st.session_state.basket.get(iname, {}).get("quantity", 0)
             cat_count = sum(d['quantity'] for d in st.session_state.basket.values() if d['category'] == cat)
             
-            if cat_count < 3 and current_qty < 3:
-                st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + 1}
+            # Determine how many we can actually add without breaching the 3-item limit
+            available_space = 3 - cat_count
+            add_amount = min(req_qty, available_space, 3 - current_qty)
+            
+            if add_amount > 0:
+                st.session_state.basket[iname] = {"category": cat, "quantity": current_qty + add_amount}
                 added.append(iname)
+                
+                # If they asked for 3 but we only had space for 1, mark as partially rejected
+                if req_qty > add_amount:
+                    rejected.append({"name": iname, "category": cat})
             else:
                 rejected.append({"name": iname, "category": cat})
                 
@@ -259,24 +290,26 @@ else:
         
         added_items, rejected_items = check_and_auto_add_cart(user_input_text, inventory_items)
         
+        # Prepare dynamic alert context instead of appending a new system message block
+        dynamic_context = ""
         if rejected_items:
             rej_names = [r["name"] for r in rejected_items]
             rej_cat = rejected_items[0]["category"]
-            sys_note = (
-                f"[SYSTEM ALERT: The visitor tried to add {', '.join(rej_names)}, but they already have 3 items in the '{rej_cat}' department. "
-                f"You MUST explicitly tell them they cannot add any more {rej_cat} items, but warmly suggest they choose items from other available departments.]"
+            dynamic_context = (
+                f"The visitor just tried to add {', '.join(rej_names)}, but they already hit their 3-item limit for the '{rej_cat}' department. "
+                f"You MUST explicitly tell them they cannot add any more {rej_cat} items right now, and suggest something else."
             )
-            st.session_state.messages.append({"role": "system", "content": sys_note})
             
         with st.chat_message("user"):
             st.markdown(user_input_text)
             
         with st.chat_message("assistant"):
             with st.spinner("Monique is reviewing your basket..."):
+                # Inject the updated system prompt (with any active alerts) into index 0
                 if st.session_state.messages and st.session_state.messages[0]["role"] == "system":
-                    st.session_state.messages[0]["content"] = build_system_prompt()
+                    st.session_state.messages[0]["content"] = build_system_prompt(dynamic_context)
                 else:
-                    st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt()})
+                    st.session_state.messages.insert(0, {"role": "system", "content": build_system_prompt(dynamic_context)})
                 
                 try:
                     completion = client.chat.completions.create(
@@ -288,7 +321,7 @@ else:
                     response_text = completion.choices[0].message.content
                     
                     if not response_text or not response_text.strip():
-                        response_text = "Your basket is looking wonderful. May I suggest adding some hearty grains or fresh greens to complete your selection?"
+                        response_text = "I've reviewed your request. Let me know if there's anything else you'd like to adjust in your basket."
                         
                     st.markdown(response_text)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
