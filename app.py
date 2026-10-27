@@ -16,8 +16,8 @@ st.set_page_config(
 )
 
 SUPABASE_URL = "https://qvmabwhlqzngzncawlue.supabase.co"
-SUPABASE_KEY = "sb_publishable_vlLsuD4DIgnL2fqpbr6QLQ_VsYWsAqm"
-GROQ_API_KEY = "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"
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 
 client = OpenAI(
     api_key=GROQ_API_KEY,
@@ -101,7 +101,7 @@ def speak_text(text):
         "}\n"
         "</script>"
     )
-    st.markdown(js_code, unsafe_allow_html=True) # Replaced deprecated components.html to fix reloading disconnects
+    st.markdown(js_code, unsafe_allow_html=True) 
 
 # ==========================================
 # 4. MONIQUE AI SYSTEM PROMPT BUILDER
@@ -535,7 +535,7 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     )
                     
                     res = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile", # Updated to a currently active Groq model
+                        model="llama-3.3-70b-versatile",
                         messages=[
                             {"role": "system", "content": "You are an expert nonprofit financial strategist specializing in Washington D.C. community development, food security grants, and capital campaigns."},
                             {"role": "user", "content": prompt_payload}
@@ -679,7 +679,7 @@ else:
                     
                     try:
                         completion = client.chat.completions.create(
-                            model="llama-3.3-70b-versatile", # Updated to a currently active Groq model
+                            model="llama-3.3-70b-versatile",
                             messages=st.session_state.messages,
                             temperature=0.3,
                             max_tokens=250
