@@ -101,7 +101,7 @@ def speak_text(text):
         "}\n"
         "</script>"
     )
-    components.html(js_code, height=0, width=0)
+    st.markdown(js_code, unsafe_allow_html=True) # Replaced deprecated components.html to fix reloading disconnects
 
 # ==========================================
 # 4. MONIQUE AI SYSTEM PROMPT BUILDER
@@ -535,7 +535,7 @@ if portal_mode == "🛠️ Admin Portal (Volunteers)" and st.session_state.admin
                     )
                     
                     res = client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
+                        model="llama-3.3-70b-versatile", # Updated to a currently active Groq model
                         messages=[
                             {"role": "system", "content": "You are an expert nonprofit financial strategist specializing in Washington D.C. community development, food security grants, and capital campaigns."},
                             {"role": "user", "content": prompt_payload}
@@ -679,7 +679,7 @@ else:
                     
                     try:
                         completion = client.chat.completions.create(
-                            model="openai/gpt-oss-120b",
+                            model="llama-3.3-70b-versatile", # Updated to a currently active Groq model
                             messages=st.session_state.messages,
                             temperature=0.3,
                             max_tokens=250
